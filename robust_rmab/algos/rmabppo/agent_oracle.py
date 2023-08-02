@@ -259,7 +259,9 @@ class AgentOracle:
         
 
         # Create actor-critic module
-        ac = actor_critic(env.observation_space, env.action_space,
+        print('agent_oracle.best_response_per_cpu')
+        breakpoint()
+        ac = actor_critic(env.observation_space, env.action_space, transition_prob_arr,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
             state_norm=self.state_norm,
@@ -284,15 +286,16 @@ class AgentOracle:
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
             ohs, act, adv, logp_old, lambdas, obs = data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs']
+            # data should include transition_prob_arr
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_prob], axis=2)
 
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
