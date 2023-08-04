@@ -261,6 +261,7 @@ class AgentOracle:
         # Create actor-critic module
         print('agent_oracle.best_response_per_cpu')
         breakpoint()
+        transition_prob_arr = np.array([0]) # shape (N, m), where m is dim of additional input
         ac = actor_critic(env.observation_space, env.action_space, transition_prob_arr,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
@@ -282,27 +283,38 @@ class AgentOracle:
 
         FINAL_TRAIN_LAMBDAS = final_train_lambdas
 
+        # compute_loss_pi function will need the optimizer
+        pi_optimizer = Adam(ac.pi_list.parameters(), lr=pi_lr)
+        vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
+        qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
+        lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+
+        # Set up model saving
+        logger.setup_pytorch_saver(ac)
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
             ohs, act, adv, logp_old, lambdas, obs = data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs']
-            # data should include transition_prob_arr
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
+            print('compute_loss_pi')
+            breakpoint() # check the shape of ohs, reshape transition_prob_arr if needed
             full_obs = None
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_prob], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
 
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
             # Policy loss
             for i in range(env.N):
-                pi, logp = ac.pi_list[i](full_obs[:, i], act[:, i])
+                pi_optimizer.zero_grad()
+
+                pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
                 ent = pi.entropy().mean()
                 ratio = torch.exp(logp - logp_old[:, i])
                 clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[:, i]
@@ -310,8 +322,6 @@ class AgentOracle:
                 
                 # subtract entropy term since we want to encourage it 
                 loss_pi -= entropy_coeff*ent
-
-
                 loss_pi_list[i] = loss_pi
 
                 # Useful extra info
@@ -322,6 +332,10 @@ class AgentOracle:
                 pi_info = dict(kl=approx_kl, ent=ent.item(), cf=clipfrac)
                 pi_info_list[i] = pi_info
 
+                # backprop
+                loss_pi.backward() # another option is to do backprop after a batch
+                pi_optimizer.step()
+
             return loss_pi_list, pi_info_list
 
         # Set up function for computing value loss
@@ -330,33 +344,39 @@ class AgentOracle:
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
-                loss_list[i] = ((ac.v_list[i](full_obs[:, i]) - ret[:, i])**2).mean()
+                vf_optimizer.zero_grad()
+                loss_list[i] = ((ac.v_list(full_obs[:, i]) - ret[:, i])**2).mean()
+                loss_list[i].backward()
+                vf_optimizer.step()
             return loss_list
 
         def compute_loss_q(data):
+            # seems unused
+            print('entering compute_loss_q')
+            breakpoint()
 
             ohs, qs, oha, lambdas  = data['ohs'], data['qs'], data['oha'], data['lambdas']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
                 x = torch.as_tensor(np.concatenate([full_obs[:, i], oha[:, i]], axis=1), dtype=torch.float32)
-                loss_list[i] = ((ac.q_list[i](x) - qs[:, i])**2).mean()
+                loss_list[i] = ((ac.q_list(x) - qs[:, i])**2).mean()
             return loss_list
 
         
@@ -378,26 +398,6 @@ class AgentOracle:
 
             return loss
 
-        # Set up optimizers for policy and value function
-        pi_optimizers = np.zeros(env.N,dtype=object)
-        vf_optimizers = np.zeros(env.N,dtype=object)
-        qf_optimizers = np.zeros(env.N,dtype=object)
-
-        for i in range(env.N):
-            pi_optimizers[i] = Adam(ac.pi_list[i].parameters(), lr=pi_lr)
-            # pi_optimizers[i] = SGD(ac.pi_list[i].parameters(), lr=pi_lr)
-            vf_optimizers[i] = Adam(ac.v_list[i].parameters(), lr=vf_lr)
-            # vf_optimizers[i] = SGD(ac.v_list[i].parameters(), lr=vf_lr)
-            qf_optimizers[i] = Adam(ac.q_list[i].parameters(), lr=qf_lr)
-            # qf_optimizers[i] = SGD(ac.q_list[i].parameters(), lr=qf_lr)
-        # lambda_optimizer = Adam(ac.lambda_net.parameters(), lr=lm_lr)
-        lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
-
-
-        # Set up model saving
-        logger.setup_pytorch_saver(ac)
-
-
 
         def update(epoch, head_entropy_coeff):
             data = buf.get()
@@ -414,29 +414,21 @@ class AgentOracle:
 
             # Train policy with multiple steps of gradient descent
             for i in range(train_pi_iters):
-                for i in range(env.N):
-                    pi_optimizers[i].zero_grad()
-                loss_pi, pi_info = compute_loss_pi(data, entropy_coeff)
-                for i in range(env.N):
-                    kl = mpi_avg(pi_info[i]['kl'])
-                    # if kl > 1.5 * target_kl:
-                    #     logger.log('Early stopping at step %d due to reaching max kl.'%i)
-                    #     break
-                    loss_pi[i].backward()
-                    mpi_avg_grads(ac.pi_list[i])    # average grads across MPI processes
-                    pi_optimizers[i].step()
+                # pi_optimizer.zero_grad()
+                loss_pi_list, pi_info_list = compute_loss_pi(data, entropy_coeff)
+                # loss_pi.backward() # moved inside the function compute_loss_pi
+                # mpi_avg_grads(ac.pi_list)    # average grads across MPI processes
+                # pi_optimizer.step()
 
             logger.store(StopIter=i)
 
             # Value function learning
             for i in range(train_v_iters):
-                for i in range(env.N):
-                    vf_optimizers[i].zero_grad()
-                loss_v = compute_loss_v(data)
-                for i in range(env.N):
-                    loss_v[i].backward()
-                    mpi_avg_grads(ac.v_list[i])    # average grads across MPI processes
-                    vf_optimizers[i].step()
+                # vf_optimizer.zero_grad()
+                loss_v_list = compute_loss_v(data)
+                # loss_v.backward() # moved inside the function compute_loss_v
+                # mpi_avg_grads(ac.v_list)    # average grads across MPI processes
+                # vf_optimizer.step()
 
 
             # Lambda optimization
@@ -453,7 +445,7 @@ class AgentOracle:
                 # print('last param',last_param)
                 # print('grad',last_param.grad)
 
-                mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+                # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
                 lambda_optimizer.step()
                 
 
@@ -476,7 +468,7 @@ class AgentOracle:
             loss_lamb.backward()
             last_param = list(ac.lambda_net.parameters())[-1]
 
-            mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+            # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
 
