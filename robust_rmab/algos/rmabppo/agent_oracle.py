@@ -30,7 +30,7 @@ class RMABPPO_Buffer:
 
     def __init__(self, obs_dim, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
         self.N = N
-
+        self.obs_dim = obs_dim
         self.one_hot_encode = one_hot_encode
         # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
         # I suspect the 4 can be replaced by obs_dim * act_dim
@@ -299,13 +299,13 @@ class AgentOracle:
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # this line below may not be necessary, if the transition_probs are stored as float32
-            transition_probs_tensor =  torch.from_numpy(transition_probs).float()
+            # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
@@ -343,13 +343,13 @@ class AgentOracle:
                 data['ohs'], data['ret'], data['lambdas'], data['obs'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
-            transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
+            # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -361,20 +361,20 @@ class AgentOracle:
 
         def compute_loss_q(data):
             # seems unused
-            print('entering compute_loss_q, this function seems to be not used')
+            print('compute_loss_q. seems this function is unused')
             breakpoint()
 
             ohs, qs, oha, lambdas, transition_probs  = \
                 data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
-            transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
+            # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -510,7 +510,6 @@ class AgentOracle:
                 # update the transition probabilities input
                 ac.update_transition_probs(a_nature)
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
-                breakpoint()
 
                 # if (local_steps_per_epoch - t) < 25:
                     # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)

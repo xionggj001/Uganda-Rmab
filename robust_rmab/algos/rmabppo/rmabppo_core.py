@@ -180,7 +180,7 @@ class MLPActorCriticRMAB(nn.Module):
         # input is 1d array of length N
         # output is 2d array of shape (N, 4)
         # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
-        self.transition_probs_arr = np.zeros((self,N))
+        self.transition_prob_arr = np.zeros((self.N, 4))
         for i in range(self.N):
             self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
 
