@@ -176,7 +176,7 @@ class MLPActorCriticRMAB(nn.Module):
         self.ind = strat_ind
 
     def update_transition_probs(self, transition_probs_input):
-        # assume states are (0,1) and actions are (0,1)
+        # assume states are (0,1) and actions are (0,1). so transition probabilities can be encode by 4 numbers
         # input is 1d array of length N
         # output is 2d array of shape (N, 4)
         # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper

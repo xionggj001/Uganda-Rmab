@@ -534,7 +534,7 @@ class AgentOracle:
 
 
                 # save and log
-                buf.store(o, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.transition_prob_arr, a_agent, r, cost_vec, v, q, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
