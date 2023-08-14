@@ -1,7 +1,7 @@
 data="counterexample"
 save_string="ce_do_test"
 N=3
-B=2
+B=1
 seed=0
 cdir="."
 no_hawkins=1

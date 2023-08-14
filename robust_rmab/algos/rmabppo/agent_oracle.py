@@ -30,10 +30,11 @@ class RMABPPO_Buffer:
 
     def __init__(self, obs_dim, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
         self.N = N
-        self.obs_dim = obs_dim
 
         self.one_hot_encode = one_hot_encode
-
+        # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
+        # I suspect the 4 can be replaced by obs_dim * act_dim
+        self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, 4)), dtype=np.float32)
         self.obs_buf = np.zeros(core.combined_shape(size, N), dtype=np.float32)
         self.ohs_buf = np.zeros(core.combined_shape(size, (N, obs_dim)), dtype=np.float32)
         
@@ -56,7 +57,7 @@ class RMABPPO_Buffer:
         self.act_dim = act_dim
 
 
-    def store(self, obs, act, rew, cost, val, q, lamb, logp):
+    def store(self, obs, transition_probs, act, rew, cost, val, q, lamb, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -67,7 +68,7 @@ class RMABPPO_Buffer:
             for i in range(self.N):
                 ohs[i, int(obs[i])] = 1
         self.ohs_buf[self.ptr] = ohs
-
+        self.transition_probs_buf[self.ptr] = transition_probs
 
         self.act_buf[self.ptr] = act
         oha = np.zeros((self.N, self.act_dim))
@@ -157,7 +158,8 @@ class RMABPPO_Buffer:
         
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                 adv=self.adv_buf, logp=self.logp_buf, qs=self.q_buf, oha=self.oha_buf, 
-                ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf)
+                ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf,
+                transition_probs=self.transition_probs_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
 
@@ -259,12 +261,7 @@ class AgentOracle:
         
 
         # Create actor-critic module
-        print('agent_oracle.best_response_per_cpu')
-        # dummy values. need to communicate with the env to get actual values
-        # shape (N, m), where m is dim of additional input
-        transition_prob_arr = np.array([[0.5,0.5,0.5,0.5],[0.5,0.5,0.5,0.5],[0.5,0.5,0.5,0.5]])
-
-        ac = actor_critic(env.observation_space, env.action_space, transition_prob_arr,
+        ac = actor_critic(env.observation_space, env.action_space,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
             state_norm=self.state_norm,
@@ -296,17 +293,19 @@ class AgentOracle:
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
-            ohs, act, adv, logp_old, lambdas, obs = data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs']
+            ohs, act, adv, logp_old, lambdas, obs, transition_probs = \
+                data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs'], data['transition_probs']
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
-            tiled_transition_prob_arr =  torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
+            # this line below may not be necessary, if the transition_probs are stored as float32
+            transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
@@ -340,16 +339,17 @@ class AgentOracle:
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ohs, ret, lambdas, obs = data['ohs'], data['ret'], data['lambdas'], data['obs']
+            ohs, ret, lambdas, obs, transition_probs = \
+                data['ohs'], data['ret'], data['lambdas'], data['obs'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
-            tiled_transition_prob_arr = torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
+            transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -364,16 +364,17 @@ class AgentOracle:
             print('entering compute_loss_q, this function seems to be not used')
             breakpoint()
 
-            ohs, qs, oha, lambdas  = data['ohs'], data['qs'], data['oha'], data['lambdas']
+            ohs, qs, oha, lambdas, transition_probs  = \
+                data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
-            tiled_transition_prob_arr = torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
+            transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs_tensor], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs_tensor], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -498,14 +499,18 @@ class AgentOracle:
             # Resample nature policy every time we update lambda
             if epoch%lamb_update_freq == 0 and epoch > 0:
                 nature_pol = np.random.choice(nature_strats,p=nature_eq)
+                # get transition probs from this nature policy
 
 
             for t in range(local_steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
+                # a_nature is 1d array of length N, encoding the transition probs
                 a_nature = nature_pol.get_nature_action(torch_o)
-
                 a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                # update the transition probabilities input
+                ac.update_transition_probs(a_nature)
+                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
+                breakpoint()
 
                 # if (local_steps_per_epoch - t) < 25:
                     # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
@@ -616,10 +621,10 @@ class AgentOracle:
                 a_nature = nature_pol.get_nature_action(torch_o)
                 a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
 
-
-
+                # update the transition probabilities input
+                ac.update_transition_probs(a_nature)
                 next_o, r, d, _ = env.step(a_agent, a_nature_env)
-                
+
                 next_o = next_o.reshape(-1)
                 
                 actual_r = r.sum()

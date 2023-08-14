@@ -169,11 +169,20 @@ class MLPActorCriticRMAB(nn.Module):
         # networks are one-hot encoding the states...
         # This leads to a dimension difference...
         # need to change this eventually
-        lambda_hidden_sizes = [8,8]
+        lambda_hidden_sizes = [8, 8]
         self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
 
         self.name = "RMABPPO"
         self.ind = strat_ind
+
+    def update_transition_probs(self, transition_probs_input):
+        # assume states are (0,1) and actions are (0,1)
+        # input is 1d array of length N
+        # output is 2d array of shape (N, 4)
+        # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
+        self.transition_probs_arr = np.zeros((self,N))
+        for i in range(self.N):
+            self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
 
 
     def __repr__(self):
