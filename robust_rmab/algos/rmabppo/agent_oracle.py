@@ -260,8 +260,10 @@ class AgentOracle:
 
         # Create actor-critic module
         print('agent_oracle.best_response_per_cpu')
-        breakpoint()
-        transition_prob_arr = np.array([0]) # shape (N, m), where m is dim of additional input
+        # dummy values. need to communicate with the env to get actual values
+        # shape (N, m), where m is dim of additional input
+        transition_prob_arr = np.array([[0.5,0.5,0.5,0.5],[0.5,0.5,0.5,0.5],[0.5,0.5,0.5,0.5]])
+
         ac = actor_critic(env.observation_space, env.action_space, transition_prob_arr,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
@@ -297,16 +299,14 @@ class AgentOracle:
             ohs, act, adv, logp_old, lambdas, obs = data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs']
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
-            print('compute_loss_pi')
-            breakpoint() # check the shape of ohs, reshape transition_prob_arr if needed
             full_obs = None
+            tiled_transition_prob_arr =  torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
-
+                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
@@ -314,7 +314,7 @@ class AgentOracle:
             for i in range(env.N):
                 pi_optimizer.zero_grad()
 
-                pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
+                pi, logp = ac.pi_list(full_obs[:, i], act[:, i]) # this line has errors
                 ent = pi.entropy().mean()
                 ratio = torch.exp(logp - logp_old[:, i])
                 clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[:, i]
@@ -343,12 +343,13 @@ class AgentOracle:
             ohs, ret, lambdas, obs = data['ohs'], data['ret'], data['lambdas'], data['obs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
+            tiled_transition_prob_arr = torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -360,18 +361,19 @@ class AgentOracle:
 
         def compute_loss_q(data):
             # seems unused
-            print('entering compute_loss_q')
+            print('entering compute_loss_q, this function seems to be not used')
             breakpoint()
 
             ohs, qs, oha, lambdas  = data['ohs'], data['qs'], data['oha'], data['lambdas']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
+            tiled_transition_prob_arr = torch.from_numpy(np.array([transition_prob_arr] * ohs.shape[0])).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_prob_arr], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_prob_arr], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, tiled_transition_prob_arr], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):

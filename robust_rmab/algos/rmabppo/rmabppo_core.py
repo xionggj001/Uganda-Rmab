@@ -128,7 +128,7 @@ def list_valid_action_combinations(N,C,B,options):
 class MLPActorCriticRMAB(nn.Module):
 
 
-    def __init__(self, observation_space, action_space, transition_prob_arr,
+    def __init__(self, observation_space, action_space, transition_prob_arr=[],
                  hidden_sizes=(64,64), C=None, N=None, B=None,
                  strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
                  state_norm=None,
@@ -337,6 +337,7 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+
 
             for i in range(self.N):
                 transition_prob = self.transition_prob_arr[i]
