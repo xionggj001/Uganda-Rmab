@@ -1,6 +1,6 @@
 data="counterexample"
 save_string="ce_rmabppo_test"
-N=3
+N=9
 B=1.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=200
