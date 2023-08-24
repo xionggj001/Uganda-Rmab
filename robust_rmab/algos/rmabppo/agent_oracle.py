@@ -35,6 +35,9 @@ class RMABPPO_Buffer:
         # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
         # I suspect the 4 can be replaced by obs_dim * act_dim
         self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, 4)), dtype=np.float32)
+        # binary encoding of opt-in decisions. initialize all states as opt-in
+        self.opt_in_buf = np.ones(core.combined_shape(size, N), dtype=np.float32)
+
         self.obs_buf = np.zeros(core.combined_shape(size, N), dtype=np.float32)
         self.ohs_buf = np.zeros(core.combined_shape(size, (N, obs_dim)), dtype=np.float32)
         
@@ -57,7 +60,7 @@ class RMABPPO_Buffer:
         self.act_dim = act_dim
 
 
-    def store(self, obs, transition_probs, act, rew, cost, val, q, lamb, logp):
+    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, q, lamb, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -69,6 +72,7 @@ class RMABPPO_Buffer:
                 ohs[i, int(obs[i])] = 1
         self.ohs_buf[self.ptr] = ohs
         self.transition_probs_buf[self.ptr] = transition_probs
+        self.opt_in_buf[self.ptr] = opt_in
 
         self.act_buf[self.ptr] = act
         oha = np.zeros((self.N, self.act_dim))
@@ -112,6 +116,8 @@ class RMABPPO_Buffer:
             rews = np.append(self.rew_buf[path_slice, i], last_vals[i])
             # TODO implement training that makes use of last_costs, i.e., use all samples to update lam
             costs = np.append(self.cost_buf[path_slice, i], 0)
+            if self.opt_in_buf[self.ptr,i] == 0:
+                costs[-2] = 0 # hardcoded for now. later: read the cost of no action from the env
             # print(costs)
             lambds = np.append(self.lamb_buf[path_slice], 0)
 
@@ -123,7 +129,7 @@ class RMABPPO_Buffer:
             vals = np.append(self.val_buf[path_slice, i], last_vals[i])
             
             # the next two lines implement GAE-Lambda advantage calculation
-            qs = rews[:-1] + self.gamma * vals[1:]
+            qs = rews[:-1] + self.gamma * vals[1:] # gamma is the beta in the paper
             deltas = qs - vals[:-1]
             self.adv_buf[path_slice, i] = core.discount_cumsum(deltas, self.gamma * self.lam_OTHER)
             
@@ -159,7 +165,7 @@ class RMABPPO_Buffer:
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                 adv=self.adv_buf, logp=self.logp_buf, qs=self.q_buf, oha=self.oha_buf, 
                 ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf,
-                transition_probs=self.transition_probs_buf)
+                transition_probs=self.transition_probs_buf, opt_in=self.opt_in_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
 
@@ -293,8 +299,9 @@ class AgentOracle:
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
-            ohs, act, adv, logp_old, lambdas, obs, transition_probs = \
-                data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs'], data['transition_probs']
+            ohs, act, adv, logp_old, lambdas, obs, transition_probs, opt_in = \
+                data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], \
+                data['obs'], data['transition_probs'], data['opt_in']
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
@@ -311,6 +318,9 @@ class AgentOracle:
 
             # Policy loss
             for i in range(env.N):
+                # do not backprop when this arm opts-out
+                if opt_in[-1,i] == 0:
+                    continue
                 pi_optimizer.zero_grad()
 
                 pi, logp = ac.pi_list(full_obs[:, i], act[:, i]) # this line has errors
@@ -339,8 +349,9 @@ class AgentOracle:
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ohs, ret, lambdas, obs, transition_probs = \
-                data['ohs'], data['ret'], data['lambdas'], data['obs'], data['transition_probs']
+            ohs, ret, lambdas, obs, transition_probs. opt_in = \
+                data['ohs'], data['ret'], data['lambdas'], data['obs'], \
+                data['transition_probs'], data['opt_in']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
@@ -353,6 +364,9 @@ class AgentOracle:
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
+                # do not backprop when this arm opts-out
+                if opt_in[-1,i] == 0:
+                    continue
                 vf_optimizer.zero_grad()
                 loss_list[i] = ((ac.v_list(full_obs[:, i]) - ret[:, i])**2).mean()
                 loss_list[i].backward()
@@ -450,7 +464,9 @@ class AgentOracle:
 
                 # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
                 lambda_optimizer.step()
-                
+
+                # update the opt-in decisions, which will stay the same until the next time we update lambda net
+                ac.update_opt_in()
 
         # Prepare for interaction with environment
         start_time = time.time()
@@ -533,7 +549,7 @@ class AgentOracle:
 
 
                 # save and log
-                buf.store(o, ac.transition_prob_arr, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.transition_prob_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
