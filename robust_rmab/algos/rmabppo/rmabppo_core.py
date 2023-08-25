@@ -128,7 +128,7 @@ def list_valid_action_combinations(N,C,B,options):
 class MLPActorCriticRMAB(nn.Module):
 
 
-    def __init__(self, observation_space, action_space, transition_prob_arr=[], opt_in=[]
+    def __init__(self, observation_space, action_space, transition_prob_arr=[], opt_in=[],
                  hidden_sizes=(64,64), C=None, N=None, B=None,
                  strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
                  state_norm=None,
@@ -188,7 +188,8 @@ class MLPActorCriticRMAB(nn.Module):
     def update_opt_in(self):
         # randomly choose arms to opt-out. randomly choose some opt-out states to opt-in again
         opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
-        next_iter_prob = self.opt_in * opt_out_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
+        # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
+        next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
         self.opt_in = np.random.binomial([1] * self.N, next_iter_prob)
 
     def __repr__(self):
@@ -239,7 +240,13 @@ class MLPActorCriticRMAB(nn.Module):
                 a = pi.sample()
                 a1_probs[i] = pi.probs.numpy()[1]
                 logp_a = self.pi_list._log_prob_from_distribution(pi, a)
+                # logp_a is log of probability of choosing this action.
+                # if a=1, then logp_a=log(a1_probs[i]); else, logp_a=log(1-a1_probs[i])
                 v = self.v_list(full_obs)
+                if self.opt_in[i] < 0.5:
+                    a = torch.tensor(0) # not pull
+                    a1_probs[i] = 0.01 # prob of pulling is near zero
+                    logp_a = torch.tensor(np.log(0.01)) # log(0) is undefined, so we use log(0.01)
 
                 a_list[i] = a.numpy()
                 v_list[i] = v.numpy()
@@ -392,7 +399,8 @@ class MLPActorCriticRMAB(nn.Module):
                 while i < self.N:
                     arm = row_order[i]
                     arm_a = pi_arg_maxes[row_order[i]][-1]
-
+                    if self.opt_in[i] == 0:
+                        arm_a = 0 # 'no pull' action for opt-out arms.
                     a_cost = self.C[arm_a]
                     
                     # if difference in price takes us over, we have to stop

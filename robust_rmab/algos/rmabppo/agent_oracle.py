@@ -116,8 +116,8 @@ class RMABPPO_Buffer:
             rews = np.append(self.rew_buf[path_slice, i], last_vals[i])
             # TODO implement training that makes use of last_costs, i.e., use all samples to update lam
             costs = np.append(self.cost_buf[path_slice, i], 0)
-            if self.opt_in_buf[self.ptr,i] == 0:
-                costs[-2] = 0 # hardcoded for now. later: read the cost of no action from the env
+            if self.opt_in_buf[self.ptr - 1, i] == 0:
+                costs = 0 * costs # hardcoded for now. later: read the cost of no action from the env
             # print(costs)
             lambds = np.append(self.lamb_buf[path_slice], 0)
 
@@ -349,7 +349,7 @@ class AgentOracle:
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ohs, ret, lambdas, obs, transition_probs. opt_in = \
+            ohs, ret, lambdas, obs, transition_probs, opt_in = \
                 data['ohs'], data['ret'], data['lambdas'], data['obs'], \
                 data['transition_probs'], data['opt_in']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
@@ -490,7 +490,7 @@ class AgentOracle:
             # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
-
+        ac.update_opt_in()
 
         # Sample a nature policy
         nature_eq = np.array(nature_eq)
@@ -632,12 +632,12 @@ class AgentOracle:
 
             for t in range(steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                a_agent  = agent_pol.act_test(torch_o)
                 a_nature = nature_pol.get_nature_action(torch_o)
                 a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
 
                 # update the transition probabilities input
                 ac.update_transition_probs(a_nature)
+                a_agent  = agent_pol.act_test(torch_o)
                 next_o, r, d, _ = env.step(a_agent, a_nature_env)
 
                 next_o = next_o.reshape(-1)
