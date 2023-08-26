@@ -567,6 +567,7 @@ class AgentOracle:
                     # if trajectory didn't reach terminal state, bootstrap value target
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
+                        print('opt-in', ac.opt_in)
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
