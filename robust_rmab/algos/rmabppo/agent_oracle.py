@@ -524,7 +524,11 @@ class AgentOracle:
                 a_nature = nature_pol.get_nature_action(torch_o)
                 a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
                 # update the transition probabilities input
-                ac.update_transition_probs(a_nature)
+                T_matrix = env.get_T_for_a_nature(a_nature)
+                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                ac.transition_prob_arr = T_matrix # this update can accomodate different env
+
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 
                 # if (local_steps_per_epoch - t) < 25:
@@ -568,6 +572,7 @@ class AgentOracle:
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
                         print('opt-in', ac.opt_in)
+                        print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
@@ -637,7 +642,11 @@ class AgentOracle:
                 a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
 
                 # update the transition probabilities input
-                ac.update_transition_probs(a_nature)
+                T_matrix = env.get_T_for_a_nature(a_nature)
+                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                ac.transition_prob_arr = T_matrix
+
                 a_agent  = agent_pol.act_test(torch_o)
                 next_o, r, d, _ = env.step(a_agent, a_nature_env)
 
