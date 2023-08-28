@@ -176,21 +176,24 @@ class MLPActorCriticRMAB(nn.Module):
         self.name = "RMABPPO"
         self.ind = strat_ind
 
-    def update_transition_probs(self, transition_probs_input):
-        # assume states are (0,1) and actions are (0,1). so transition probabilities can be encode by 4 numbers
-        # input is 1d array of length N
-        # output is 2d array of shape (N, 4)
-        # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
-        self.transition_prob_arr = np.zeros((self.N, 4))
-        for i in range(self.N):
-            self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
+    # def update_transition_probs(self, transition_probs_input):
+    #     # assume states are (0,1) and actions are (0,1). so transition probabilities can be encode by 4 numbers
+    #     # input is 1d array of length N
+    #     # output is 2d array of shape (N, 4)
+    #     # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
+    #     self.transition_prob_arr = np.zeros((self.N, 4))
+    #     for i in range(self.N):
+    #         self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
 
     def update_opt_in(self):
         # randomly choose arms to opt-out. randomly choose some opt-out states to opt-in again
         opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
         # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
         next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
-        self.opt_in = np.random.binomial([1] * self.N, next_iter_prob)
+        new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
+        new_arm_indices = ((new_opt_in - self.opt_in) > 0.5).astype(int)
+        self.opt_in = new_opt_in
+        return new_arms_indices
 
     def __repr__(self):
         return "%s_%i"%(self.name, self.ind)
@@ -245,8 +248,8 @@ class MLPActorCriticRMAB(nn.Module):
                 v = self.v_list(full_obs)
                 if self.opt_in[i] < 0.5:
                     a = torch.tensor(0) # not pull
-                    a1_probs[i] = 0.01 # prob of pulling is near zero
-                    logp_a = torch.tensor(np.log(0.01)) # log(0) is undefined, so we use log(0.01)
+                    a1_probs[i] = 0.1 # prob of pulling is near zero
+                    logp_a = torch.tensor(np.log(0.1)) # log(0) is undefined, so we use log(0.1)
 
                 a_list[i] = a.numpy()
                 v_list[i] = v.numpy()
@@ -399,7 +402,7 @@ class MLPActorCriticRMAB(nn.Module):
                 while i < self.N:
                     arm = row_order[i]
                     arm_a = pi_arg_maxes[row_order[i]][-1]
-                    if self.opt_in[i] == 0:
+                    if self.opt_in[i] < 0.5:
                         arm_a = 0 # 'no pull' action for opt-out arms.
                     a_cost = self.C[arm_a]
                     

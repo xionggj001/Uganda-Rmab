@@ -466,7 +466,8 @@ class AgentOracle:
                 lambda_optimizer.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
-                ac.update_opt_in()
+                new_arms_indices = ac.update_opt_in()
+                env.updat_transition_probs(new_arms_indices)
 
         # Prepare for interaction with environment
         start_time = time.time()
@@ -483,22 +484,25 @@ class AgentOracle:
             init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
             init_lambda_optimizer.zero_grad()
             loss_lamb = ac.return_large_lambda_loss(o, gamma)
-            
+
             loss_lamb.backward()
             last_param = list(ac.lambda_net.parameters())[-1]
 
             # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
-        ac.update_opt_in()
+        env.updat_transition_probs(np.zeros(env.N)) # initialize all transition probs
+        new_arms_indices = ac.update_opt_in()
+        env.updat_transition_probs(new_arms_indices)
+        breakpoint()
 
-        # Sample a nature policy
-        nature_eq = np.array(nature_eq)
-        nature_eq[nature_eq < 0] = 0
-        nature_eq = nature_eq / nature_eq.sum()
-        # print('nature_eq')
-        # print(nature_eq)
-        nature_pol = np.random.choice(nature_strats,p=nature_eq)
+        # # Sample a nature policy
+        # nature_eq = np.array(nature_eq)
+        # nature_eq[nature_eq < 0] = 0
+        # nature_eq = nature_eq / nature_eq.sum()
+        # # print('nature_eq')
+        # # print(nature_eq)
+        # nature_pol = np.random.choice(nature_strats,p=nature_eq)
 
 
         # Main loop: collect experience in env and update/log each epoch
@@ -512,19 +516,19 @@ class AgentOracle:
                 logger.store(Lamb=current_lamb)
 
 
-            # Resample nature policy every time we update lambda
-            if epoch%lamb_update_freq == 0 and epoch > 0:
-                nature_pol = np.random.choice(nature_strats,p=nature_eq)
-                # get transition probs from this nature policy
+            # # Resample nature policy every time we update lambda
+            # if epoch%lamb_update_freq == 0 and epoch > 0:
+            #     nature_pol = np.random.choice(nature_strats,p=nature_eq)
+            #     # get transition probs from this nature policy
 
 
             for t in range(local_steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
                 # a_nature is 1d array of length N, encoding the transition probs
-                a_nature = nature_pol.get_nature_action(torch_o)
-                a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                # a_nature = nature_pol.get_nature_action(torch_o)
+                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
                 # update the transition probabilities input
-                T_matrix = env.get_T_for_a_nature(a_nature)
+                T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix # this update can accomodate different env
@@ -534,7 +538,8 @@ class AgentOracle:
                 # if (local_steps_per_epoch - t) < 25:
                     # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
 
-                next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                next_o, r, d, _ = env.step(a_agent) # removed a_nature
                 
                 next_o = next_o.reshape(-1)
                 
@@ -619,13 +624,13 @@ class AgentOracle:
         return ac
 
 
-    def simulate_reward(self, agent_pol, nature_pol, seed=0, 
+    def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
             steps_per_epoch=100, epochs=100, gamma=0.99):
 
         # make a new env for computing returns 
         env = self.env_fn()
         # important to make sure these are always the same for all instatiations of the env
-        env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+        # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
 
         env.seed(seed)
 
@@ -638,17 +643,19 @@ class AgentOracle:
 
             for t in range(steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                a_nature = nature_pol.get_nature_action(torch_o)
-                a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                # a_nature = nature_pol.get_nature_action(torch_o)
+                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+
 
                 # update the transition probabilities input
-                T_matrix = env.get_T_for_a_nature(a_nature)
+                T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix
 
                 a_agent  = agent_pol.act_test(torch_o)
-                next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                next_o, r, d, _ = env.step(a_agent) # removed a_nature
 
                 next_o = next_o.reshape(-1)
                 
