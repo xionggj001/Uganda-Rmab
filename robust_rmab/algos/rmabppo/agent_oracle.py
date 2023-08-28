@@ -491,10 +491,9 @@ class AgentOracle:
             # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
-        env.update_transition_probs(np.zeros(env.N)) # initialize all transition probs
+        env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
         new_arms_indices = ac.update_opt_in()
         env.update_transition_probs(new_arms_indices)
-        breakpoint()
 
         # # Sample a nature policy
         # nature_eq = np.array(nature_eq)

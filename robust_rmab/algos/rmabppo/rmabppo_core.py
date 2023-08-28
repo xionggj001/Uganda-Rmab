@@ -191,7 +191,7 @@ class MLPActorCriticRMAB(nn.Module):
         # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
         next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
         new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
-        new_arm_indices = ((new_opt_in - self.opt_in) > 0.5).astype(int)
+        new_arms_indices = ((new_opt_in - self.opt_in) > 0.5).astype(float)
         self.opt_in = new_opt_in
         return new_arms_indices
 

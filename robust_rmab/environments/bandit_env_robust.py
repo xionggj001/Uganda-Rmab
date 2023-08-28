@@ -856,12 +856,11 @@ class CounterExampleRobustEnv(gym.Env):
         #              ])
         sample_ub = [0.6, 0.6, 1.0, 1.0]
         sample_lb = [0.4, 0.4, 0.8, 0.0]
-
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
-                new_transition_probs = np.random.uniform(sample_ub, sample_ub)
-                self.T[i, :, :, 0] = new_transition_probs
-                self.T[i, :, :, 0] = 1 - new_transition_probs
+                new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
+                self.T[i, :, :, 0] = new_transition_probs.reshape((2,2))
+                self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2,2))
 
     # env has only binary actions so random is easy to generate
     def random_agent_action(self):
