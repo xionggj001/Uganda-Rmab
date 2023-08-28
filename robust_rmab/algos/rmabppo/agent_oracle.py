@@ -467,7 +467,7 @@ class AgentOracle:
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
                 new_arms_indices = ac.update_opt_in()
-                env.updat_transition_probs(new_arms_indices)
+                env.update_transition_probs(new_arms_indices)
 
         # Prepare for interaction with environment
         start_time = time.time()
@@ -491,9 +491,9 @@ class AgentOracle:
             # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
-        env.updat_transition_probs(np.zeros(env.N)) # initialize all transition probs
+        env.update_transition_probs(np.zeros(env.N)) # initialize all transition probs
         new_arms_indices = ac.update_opt_in()
-        env.updat_transition_probs(new_arms_indices)
+        env.update_transition_probs(new_arms_indices)
         breakpoint()
 
         # # Sample a nature policy
