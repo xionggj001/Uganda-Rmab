@@ -129,7 +129,7 @@ class MLPActorCriticRMAB(nn.Module):
 
 
     def __init__(self, observation_space, action_space, transition_prob_arr=[], opt_in=[],
-                 hidden_sizes=(64,64), C=None, N=None, B=None,
+                 hidden_sizes=(64,64), input_feat_dim=4, C=None, N=None, B=None,
                  strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
                  state_norm=None,
                  activation=nn.Tanh
@@ -162,9 +162,10 @@ class MLPActorCriticRMAB(nn.Module):
         self.activation = activation
         self.state_norm = state_norm
 
-        self.pi_list = MLPCategoricalActor(self.obs_dim+1+4, self.act_dim, hidden_sizes, activation)
-        self.v_list  = MLPCritic(self.obs_dim+1+4, hidden_sizes, activation)
-        self.q_list = MLPQCritic(self.obs_dim+1+4, self.act_dim, hidden_sizes, activation)
+        self.input_feat_dim = input_feat_dim
+        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
+        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, hidden_sizes, activation)
+        self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
 
         # Lambda_net is currently expected one input per arm, but other
         # networks are one-hot encoding the states...
@@ -201,9 +202,9 @@ class MLPActorCriticRMAB(nn.Module):
 
     def reset_actor_and_critic_networks(self):
         # for now, we hardcode dim + 4 for transition prob.
-        self.pi_list = MLPCategoricalActor(self.obs_dim+1+4, self.act_dim, self.hidden_sizes, self.activation)
-        self.v_list  = MLPCritic(self.obs_dim+1+4, self.hidden_sizes, self.activation)
-        self.q_list = MLPQCritic(self.obs_dim+1+4, self.act_dim, self.hidden_sizes, self.activation)
+        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
+        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, self.hidden_sizes, self.activation)
+        self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
 
 
     def return_large_lambda_loss(self, obs, gamma):

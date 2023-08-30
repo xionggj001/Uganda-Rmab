@@ -28,13 +28,13 @@ class RMABPPO_Buffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
+    def __init__(self, obs_dim, tp_feats, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
         self.N = N
         self.obs_dim = obs_dim
         self.one_hot_encode = one_hot_encode
         # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
         # I suspect the 4 can be replaced by obs_dim * act_dim
-        self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, 4)), dtype=np.float32)
+        self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, tp_feats)), dtype=np.float32)
         # binary encoding of opt-in decisions. initialize all states as opt-in
         self.opt_in_buf = np.ones(core.combined_shape(size, N), dtype=np.float32)
 
@@ -247,7 +247,8 @@ class AgentOracle:
             target_kl=0.01, logger_kwargs=dict(), save_freq=10,
             lamb_update_freq=10,
             init_lambda_trains=0,
-            final_train_lambdas=0):
+            final_train_lambdas=0,
+            tp_transform=None):
 
         
         # Special function to avoid certain slowdowns from PyTorch + MPI combo.
@@ -264,7 +265,14 @@ class AgentOracle:
         # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
         obs_dim = env.observation_space.shape
 
-        
+        # set input dim size given transformation selected 
+        # ac_kwargs["input_feat_dim"] refers to how many features generated from input tps
+        if tp_transform is None or tp_transform=="None" or ac_kwargs["input_feat_dim"]==None: 
+            print("Defaulting to ground truth transition prob. inputs")
+            ac_kwargs["input_feat_dim"] = 4
+            tp_transform = None 
+        else: 
+            print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
         # Create actor-critic module
         ac = actor_critic(env.observation_space, env.action_space,
@@ -283,7 +291,7 @@ class AgentOracle:
         local_steps_per_epoch = int(steps_per_epoch / num_procs())
 
 
-        buf = RMABPPO_Buffer(obs_dim, act_dim, env.N, ac.act_type, local_steps_per_epoch,
+        buf = RMABPPO_Buffer(obs_dim, ac_kwargs["input_feat_dim"], act_dim, env.N, ac.act_type, local_steps_per_epoch,
                         one_hot_encode=self.one_hot_encode, gamma=gamma, lam_OTHER=lam_OTHER)
 
         FINAL_TRAIN_LAMBDAS = final_train_lambdas
@@ -296,6 +304,21 @@ class AgentOracle:
 
         # Set up model saving
         logger.setup_pytorch_saver(ac)
+
+        def featurize_tp(transition_probs, transformation=None, out_dim=4):
+            N = transition_probs.shape[0]
+            output_features = np.zeros((N, out_dim))
+            np.random.seed(0)  # Set random seed for reproducibility
+            
+            if transformation == "linear":
+                transformation_matrix = np.random.rand(4, out_dim)
+                output_features = np.dot(transition_probs, transformation_matrix)
+            elif transformation == "nonlinear":
+                transformation_matrix = np.random.rand(4, out_dim)
+                output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
+            else:
+                output_features[:, :min(4, out_dim)] = transition_probs[:, :min(4, out_dim)]
+            return output_features
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
@@ -531,6 +554,7 @@ class AgentOracle:
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"]) 
 
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 
@@ -718,7 +742,8 @@ if __name__ == '__main__':
     parser.add_argument('--agent_train_pi_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_train_vf_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)")
-
+    parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
+    parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
     parser.add_argument('--pop_size', type=int, default=0)
 
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
@@ -780,8 +805,9 @@ if __name__ == '__main__':
     agent_kwargs['lm_lr'] = args.agent_lm_lr
     agent_kwargs['train_pi_iters'] = args.agent_train_pi_iters
     agent_kwargs['train_v_iters'] = args.agent_train_vf_iters
-    agent_kwargs['lamb_update_freq'] = args.agent_lamb_update_freq
-    agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l)
+    agent_kwargs['tp_transform'] = args.agent_tp_transform
+    agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l,
+                                     input_feat_dim=args.agent_tp_transform_dims)
     agent_kwargs['gamma'] = args.gamma
 
     env_fn = None

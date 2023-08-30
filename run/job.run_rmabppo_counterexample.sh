@@ -7,8 +7,9 @@ n_train_epochs=200
 seed=0
 cdir="."
 no_hawkins=1
+tp_transform="linear"
 
-bash run/run_rmabppo_counterexample.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins}
+bash run/run_rmabppo_counterexample.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform}
 
 
 
