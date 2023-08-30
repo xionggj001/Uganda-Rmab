@@ -188,9 +188,11 @@ class MLPActorCriticRMAB(nn.Module):
 
     def update_opt_in(self):
         # randomly choose arms to opt-out. randomly choose some opt-out states to opt-in again
-        opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
+        # opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
         # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
-        next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
+        # next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
+        next_iter_prob = [0.9] * self.N
+
         new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
         new_arms_indices = ((new_opt_in - self.opt_in) > 0.5).astype(float)
         self.opt_in = new_opt_in

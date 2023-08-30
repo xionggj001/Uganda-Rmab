@@ -118,6 +118,7 @@ class RMABPPO_Buffer:
             costs = np.append(self.cost_buf[path_slice, i], 0)
             if self.opt_in_buf[self.ptr - 1, i] == 0:
                 costs = 0 * costs # hardcoded for now. later: read the cost of no action from the env
+                rews = 0 * rews # dummy arms produce no reward.
             # print(costs)
             lambds = np.append(self.lamb_buf[path_slice], 0)
 
@@ -296,7 +297,7 @@ class AgentOracle:
 
         FINAL_TRAIN_LAMBDAS = final_train_lambdas
 
-        # compute_loss_pi function will need the optimizer
+        # `compute_loss_pi` function will need the optimizer
         pi_optimizer = Adam(ac.pi_list.parameters(), lr=pi_lr)
         vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
         qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
@@ -562,7 +563,7 @@ class AgentOracle:
                     # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
 
                 # next_o, r, d, _ = env.step(a_agent, a_nature_env)
-                next_o, r, d, _ = env.step(a_agent) # removed a_nature
+                next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
                 
                 next_o = next_o.reshape(-1)
                 
@@ -600,7 +601,7 @@ class AgentOracle:
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
                         print('opt-in', ac.opt_in)
-                        print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
+                        # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
@@ -678,7 +679,7 @@ class AgentOracle:
 
                 a_agent  = agent_pol.act_test(torch_o)
                 # next_o, r, d, _ = env.step(a_agent, a_nature_env)
-                next_o, r, d, _ = env.step(a_agent) # removed a_nature
+                next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
 
                 next_o = next_o.reshape(-1)
                 

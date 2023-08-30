@@ -872,7 +872,7 @@ class CounterExampleRobustEnv(gym.Env):
 
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
-    def step(self, a_agent, a_nature=[]):
+    def step(self, a_agent, opt_in, a_nature=[]):
 
         # for arm_i in range(a_nature.shape[0]):
         #     param = a_nature[arm_i]
@@ -901,6 +901,8 @@ class CounterExampleRobustEnv(gym.Env):
             next_arm_state=np.argmax(self.random_stream.multinomial(1, self.T[i, current_arm_state, int(a_agent[i]), :]))
             next_full_state[i]=next_arm_state
             rewards[i] = self.R[i, next_arm_state]
+            if opt_in[i] < 0.5:
+                next_full_state[i] = 0 # opt-out arms have dummy state
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
