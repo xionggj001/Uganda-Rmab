@@ -28,11 +28,15 @@ class RMABPPO_Buffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
+    def __init__(self, obs_dim, tp_feats, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
         self.N = N
         self.obs_dim = obs_dim
-
         self.one_hot_encode = one_hot_encode
+        # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
+        # I suspect the 4 can be replaced by obs_dim * act_dim
+        self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, tp_feats)), dtype=np.float32)
+        # binary encoding of opt-in decisions. initialize all states as opt-in
+        self.opt_in_buf = np.ones(core.combined_shape(size, N), dtype=np.float32)
 
         self.obs_buf = np.zeros(core.combined_shape(size, N), dtype=np.float32)
         self.ohs_buf = np.zeros(core.combined_shape(size, (N, obs_dim)), dtype=np.float32)
@@ -56,7 +60,7 @@ class RMABPPO_Buffer:
         self.act_dim = act_dim
 
 
-    def store(self, obs, act, rew, cost, val, q, lamb, logp):
+    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, q, lamb, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -67,7 +71,8 @@ class RMABPPO_Buffer:
             for i in range(self.N):
                 ohs[i, int(obs[i])] = 1
         self.ohs_buf[self.ptr] = ohs
-
+        self.transition_probs_buf[self.ptr] = transition_probs
+        self.opt_in_buf[self.ptr] = opt_in
 
         self.act_buf[self.ptr] = act
         oha = np.zeros((self.N, self.act_dim))
@@ -111,6 +116,8 @@ class RMABPPO_Buffer:
             rews = np.append(self.rew_buf[path_slice, i], last_vals[i])
             # TODO implement training that makes use of last_costs, i.e., use all samples to update lam
             costs = np.append(self.cost_buf[path_slice, i], 0)
+            if self.opt_in_buf[self.ptr - 1, i] == 0:
+                costs = 0 * costs # hardcoded for now. later: read the cost of no action from the env
             # print(costs)
             lambds = np.append(self.lamb_buf[path_slice], 0)
 
@@ -122,7 +129,7 @@ class RMABPPO_Buffer:
             vals = np.append(self.val_buf[path_slice, i], last_vals[i])
             
             # the next two lines implement GAE-Lambda advantage calculation
-            qs = rews[:-1] + self.gamma * vals[1:]
+            qs = rews[:-1] + self.gamma * vals[1:] # gamma is the beta in the paper
             deltas = qs - vals[:-1]
             self.adv_buf[path_slice, i] = core.discount_cumsum(deltas, self.gamma * self.lam_OTHER)
             
@@ -157,7 +164,8 @@ class RMABPPO_Buffer:
         
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                 adv=self.adv_buf, logp=self.logp_buf, qs=self.q_buf, oha=self.oha_buf, 
-                ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf)
+                ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf,
+                transition_probs=self.transition_probs_buf, opt_in=self.opt_in_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
 
@@ -239,7 +247,8 @@ class AgentOracle:
             target_kl=0.01, logger_kwargs=dict(), save_freq=10,
             lamb_update_freq=10,
             init_lambda_trains=0,
-            final_train_lambdas=0):
+            final_train_lambdas=0,
+            tp_transform=None):
 
         
         # Special function to avoid certain slowdowns from PyTorch + MPI combo.
@@ -256,7 +265,14 @@ class AgentOracle:
         # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
         obs_dim = env.observation_space.shape
 
-        
+        # set input dim size given transformation selected 
+        # ac_kwargs["input_feat_dim"] refers to how many features generated from input tps
+        if tp_transform is None or tp_transform=="None" or ac_kwargs["input_feat_dim"]==None: 
+            print("Defaulting to ground truth transition prob. inputs")
+            ac_kwargs["input_feat_dim"] = 4
+            tp_transform = None 
+        else: 
+            print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
         # Create actor-critic module
         ac = actor_critic(env.observation_space, env.action_space,
@@ -275,31 +291,62 @@ class AgentOracle:
         local_steps_per_epoch = int(steps_per_epoch / num_procs())
 
 
-        buf = RMABPPO_Buffer(obs_dim, act_dim, env.N, ac.act_type, local_steps_per_epoch,
+        buf = RMABPPO_Buffer(obs_dim, ac_kwargs["input_feat_dim"], act_dim, env.N, ac.act_type, local_steps_per_epoch,
                         one_hot_encode=self.one_hot_encode, gamma=gamma, lam_OTHER=lam_OTHER)
 
         FINAL_TRAIN_LAMBDAS = final_train_lambdas
 
+        # compute_loss_pi function will need the optimizer
+        pi_optimizer = Adam(ac.pi_list.parameters(), lr=pi_lr)
+        vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
+        qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
+        lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+
+        # Set up model saving
+        logger.setup_pytorch_saver(ac)
+
+        def featurize_tp(transition_probs, transformation=None, out_dim=4):
+            N = transition_probs.shape[0]
+            output_features = np.zeros((N, out_dim))
+            np.random.seed(0)  # Set random seed for reproducibility
+            
+            if transformation == "linear":
+                transformation_matrix = np.random.rand(4, out_dim)
+                output_features = np.dot(transition_probs, transformation_matrix)
+            elif transformation == "nonlinear":
+                transformation_matrix = np.random.rand(4, out_dim)
+                output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
+            else:
+                output_features[:, :min(4, out_dim)] = transition_probs[:, :min(4, out_dim)]
+            return output_features
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
-            ohs, act, adv, logp_old, lambdas, obs = data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], data['obs']
+            ohs, act, adv, logp_old, lambdas, obs, transition_probs, opt_in = \
+                data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], \
+                data['obs'], data['transition_probs'], data['opt_in']
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
+            # this line below may not be necessary, if the transition_probs are stored as float32
+            # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
-
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
             # Policy loss
             for i in range(env.N):
-                pi, logp = ac.pi_list[i](full_obs[:, i], act[:, i])
+                # do not backprop when this arm opts-out
+                if opt_in[-1,i] == 0:
+                    continue
+                pi_optimizer.zero_grad()
+
+                pi, logp = ac.pi_list(full_obs[:, i], act[:, i]) # this line has errors
                 ent = pi.entropy().mean()
                 ratio = torch.exp(logp - logp_old[:, i])
                 clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[:, i]
@@ -307,8 +354,6 @@ class AgentOracle:
                 
                 # subtract entropy term since we want to encourage it 
                 loss_pi -= entropy_coeff*ent
-
-
                 loss_pi_list[i] = loss_pi
 
                 # Useful extra info
@@ -319,41 +364,59 @@ class AgentOracle:
                 pi_info = dict(kl=approx_kl, ent=ent.item(), cf=clipfrac)
                 pi_info_list[i] = pi_info
 
+                # backprop
+                loss_pi.backward() # another option is to do backprop after a batch
+                pi_optimizer.step()
+
             return loss_pi_list, pi_info_list
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ohs, ret, lambdas, obs = data['ohs'], data['ret'], data['lambdas'], data['obs']
+            ohs, ret, lambdas, obs, transition_probs, opt_in = \
+                data['ohs'], data['ret'], data['lambdas'], data['obs'], \
+                data['transition_probs'], data['opt_in']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
+            # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
-                loss_list[i] = ((ac.v_list[i](full_obs[:, i]) - ret[:, i])**2).mean()
+                # do not backprop when this arm opts-out
+                if opt_in[-1,i] == 0:
+                    continue
+                vf_optimizer.zero_grad()
+                loss_list[i] = ((ac.v_list(full_obs[:, i]) - ret[:, i])**2).mean()
+                loss_list[i].backward()
+                vf_optimizer.step()
             return loss_list
 
         def compute_loss_q(data):
+            # seems unused
+            print('compute_loss_q. seems this function is unused')
+            breakpoint()
 
-            ohs, qs, oha, lambdas  = data['ohs'], data['qs'], data['oha'], data['lambdas']
+            ohs, qs, oha, lambdas, transition_probs  = \
+                data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
+            # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
             if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
             else:
                 obs = obs/self.state_norm
                 obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat], axis=2)
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
                 x = torch.as_tensor(np.concatenate([full_obs[:, i], oha[:, i]], axis=1), dtype=torch.float32)
-                loss_list[i] = ((ac.q_list[i](x) - qs[:, i])**2).mean()
+                loss_list[i] = ((ac.q_list(x) - qs[:, i])**2).mean()
             return loss_list
 
         
@@ -375,26 +438,6 @@ class AgentOracle:
 
             return loss
 
-        # Set up optimizers for policy and value function
-        pi_optimizers = np.zeros(env.N,dtype=object)
-        vf_optimizers = np.zeros(env.N,dtype=object)
-        qf_optimizers = np.zeros(env.N,dtype=object)
-
-        for i in range(env.N):
-            pi_optimizers[i] = Adam(ac.pi_list[i].parameters(), lr=pi_lr)
-            # pi_optimizers[i] = SGD(ac.pi_list[i].parameters(), lr=pi_lr)
-            vf_optimizers[i] = Adam(ac.v_list[i].parameters(), lr=vf_lr)
-            # vf_optimizers[i] = SGD(ac.v_list[i].parameters(), lr=vf_lr)
-            qf_optimizers[i] = Adam(ac.q_list[i].parameters(), lr=qf_lr)
-            # qf_optimizers[i] = SGD(ac.q_list[i].parameters(), lr=qf_lr)
-        # lambda_optimizer = Adam(ac.lambda_net.parameters(), lr=lm_lr)
-        lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
-
-
-        # Set up model saving
-        logger.setup_pytorch_saver(ac)
-
-
 
         def update(epoch, head_entropy_coeff):
             data = buf.get()
@@ -411,29 +454,21 @@ class AgentOracle:
 
             # Train policy with multiple steps of gradient descent
             for i in range(train_pi_iters):
-                for i in range(env.N):
-                    pi_optimizers[i].zero_grad()
-                loss_pi, pi_info = compute_loss_pi(data, entropy_coeff)
-                for i in range(env.N):
-                    kl = mpi_avg(pi_info[i]['kl'])
-                    # if kl > 1.5 * target_kl:
-                    #     logger.log('Early stopping at step %d due to reaching max kl.'%i)
-                    #     break
-                    loss_pi[i].backward()
-                    mpi_avg_grads(ac.pi_list[i])    # average grads across MPI processes
-                    pi_optimizers[i].step()
+                # pi_optimizer.zero_grad()
+                loss_pi_list, pi_info_list = compute_loss_pi(data, entropy_coeff)
+                # loss_pi.backward() # moved inside the function compute_loss_pi
+                # mpi_avg_grads(ac.pi_list)    # average grads across MPI processes
+                # pi_optimizer.step()
 
             logger.store(StopIter=i)
 
             # Value function learning
             for i in range(train_v_iters):
-                for i in range(env.N):
-                    vf_optimizers[i].zero_grad()
-                loss_v = compute_loss_v(data)
-                for i in range(env.N):
-                    loss_v[i].backward()
-                    mpi_avg_grads(ac.v_list[i])    # average grads across MPI processes
-                    vf_optimizers[i].step()
+                # vf_optimizer.zero_grad()
+                loss_v_list = compute_loss_v(data)
+                # loss_v.backward() # moved inside the function compute_loss_v
+                # mpi_avg_grads(ac.v_list)    # average grads across MPI processes
+                # vf_optimizer.step()
 
 
             # Lambda optimization
@@ -450,9 +485,12 @@ class AgentOracle:
                 # print('last param',last_param)
                 # print('grad',last_param.grad)
 
-                mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+                # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
                 lambda_optimizer.step()
-                
+
+                # update the opt-in decisions, which will stay the same until the next time we update lambda net
+                new_arms_indices = ac.update_opt_in()
+                env.update_transition_probs(new_arms_indices)
 
         # Prepare for interaction with environment
         start_time = time.time()
@@ -469,22 +507,24 @@ class AgentOracle:
             init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
             init_lambda_optimizer.zero_grad()
             loss_lamb = ac.return_large_lambda_loss(o, gamma)
-            
+
             loss_lamb.backward()
             last_param = list(ac.lambda_net.parameters())[-1]
 
-            mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+            # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
             init_lambda_optimizer.step()
 
+        env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+        new_arms_indices = ac.update_opt_in()
+        env.update_transition_probs(new_arms_indices)
 
-
-        # Sample a nature policy
-        nature_eq = np.array(nature_eq)
-        nature_eq[nature_eq < 0] = 0
-        nature_eq = nature_eq / nature_eq.sum()
-        # print('nature_eq')
-        # print(nature_eq)
-        nature_pol = np.random.choice(nature_strats,p=nature_eq)
+        # # Sample a nature policy
+        # nature_eq = np.array(nature_eq)
+        # nature_eq[nature_eq < 0] = 0
+        # nature_eq = nature_eq / nature_eq.sum()
+        # # print('nature_eq')
+        # # print(nature_eq)
+        # nature_pol = np.random.choice(nature_strats,p=nature_eq)
 
 
         # Main loop: collect experience in env and update/log each epoch
@@ -498,22 +538,31 @@ class AgentOracle:
                 logger.store(Lamb=current_lamb)
 
 
-            # Resample nature policy every time we update lambda
-            if epoch%lamb_update_freq == 0 and epoch > 0:
-                nature_pol = np.random.choice(nature_strats,p=nature_eq)
+            # # Resample nature policy every time we update lambda
+            # if epoch%lamb_update_freq == 0 and epoch > 0:
+            #     nature_pol = np.random.choice(nature_strats,p=nature_eq)
+            #     # get transition probs from this nature policy
 
 
             for t in range(local_steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
-                a_nature = nature_pol.get_nature_action(torch_o)
+                # a_nature is 1d array of length N, encoding the transition probs
+                # a_nature = nature_pol.get_nature_action(torch_o)
+                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                # update the transition probabilities input
+                T_matrix = env.T
+                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"]) 
 
-                a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 
                 # if (local_steps_per_epoch - t) < 25:
                     # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
 
-                next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                next_o, r, d, _ = env.step(a_agent) # removed a_nature
                 
                 next_o = next_o.reshape(-1)
                 
@@ -532,7 +581,7 @@ class AgentOracle:
 
 
                 # save and log
-                buf.store(o, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.transition_prob_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
@@ -550,6 +599,8 @@ class AgentOracle:
                     # if trajectory didn't reach terminal state, bootstrap value target
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
+                        print('opt-in', ac.opt_in)
+                        print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
@@ -596,13 +647,13 @@ class AgentOracle:
         return ac
 
 
-    def simulate_reward(self, agent_pol, nature_pol, seed=0, 
+    def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
             steps_per_epoch=100, epochs=100, gamma=0.99):
 
         # make a new env for computing returns 
         env = self.env_fn()
         # important to make sure these are always the same for all instatiations of the env
-        env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+        # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
 
         env.seed(seed)
 
@@ -615,14 +666,20 @@ class AgentOracle:
 
             for t in range(steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
+                # a_nature = nature_pol.get_nature_action(torch_o)
+                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+
+
+                # update the transition probabilities input
+                T_matrix = env.T
+                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                ac.transition_prob_arr = T_matrix
+
                 a_agent  = agent_pol.act_test(torch_o)
-                a_nature = nature_pol.get_nature_action(torch_o)
-                a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                next_o, r, d, _ = env.step(a_agent) # removed a_nature
 
-
-
-                next_o, r, d, _ = env.step(a_agent, a_nature_env)
-                
                 next_o = next_o.reshape(-1)
                 
                 actual_r = r.sum()
@@ -685,7 +742,8 @@ if __name__ == '__main__':
     parser.add_argument('--agent_train_pi_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_train_vf_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)")
-
+    parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
+    parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
     parser.add_argument('--pop_size', type=int, default=0)
 
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
@@ -747,8 +805,9 @@ if __name__ == '__main__':
     agent_kwargs['lm_lr'] = args.agent_lm_lr
     agent_kwargs['train_pi_iters'] = args.agent_train_pi_iters
     agent_kwargs['train_v_iters'] = args.agent_train_vf_iters
-    agent_kwargs['lamb_update_freq'] = args.agent_lamb_update_freq
-    agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l)
+    agent_kwargs['tp_transform'] = args.agent_tp_transform
+    agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l,
+                                     input_feat_dim=args.agent_tp_transform_dims)
     agent_kwargs['gamma'] = args.gamma
 
     env_fn = None

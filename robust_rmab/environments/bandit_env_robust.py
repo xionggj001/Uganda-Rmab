@@ -846,6 +846,21 @@ class CounterExampleRobustEnv(gym.Env):
 
         return T, R, C
 
+    def update_transition_probs(self, arms_to_update):
+        # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
+        # t = np.array([[ [0.5, 0.5],
+        #                 [0.5, 0.5]],
+        #
+        #                [[1.0, 0.0],
+        #                 [0.0, -1.]] # only set the param for acting in state 1
+        #              ])
+        sample_ub = [0.6, 0.6, 1.0, 1.0]
+        sample_lb = [0.4, 0.4, 0.8, 0.0]
+        for i in range(self.N):
+            if arms_to_update[i] > 0.5:
+                new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
+                self.T[i, :, :, 0] = new_transition_probs.reshape((2,2))
+                self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2,2))
 
     # env has only binary actions so random is easy to generate
     def random_agent_action(self):
@@ -857,26 +872,26 @@ class CounterExampleRobustEnv(gym.Env):
 
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
-    def step(self, a_agent, a_nature):
+    def step(self, a_agent, a_nature=[]):
 
-        for arm_i in range(a_nature.shape[0]):
-            param = a_nature[arm_i]
-            arm_state = int(self.current_full_state[arm_i])
-            
+        # for arm_i in range(a_nature.shape[0]):
+        #     param = a_nature[arm_i]
+        #     arm_state = int(self.current_full_state[arm_i])
+        #
+        #
+        #     if param < self.sampled_parameter_ranges[arm_i, 0]:
+        #         print("Warning! nature action below allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i]))
+        #         print("Setting to lower bound of range...")
+        #         param = self.sampled_parameter_ranges[arm_i, 0]
+        #     elif param > self.sampled_parameter_ranges[arm_i, 1]:
+        #         print("Warning! nature action above allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i]))
+        #         print("Setting to upper bound of range...")
+        #         param = self.sampled_parameter_ranges[arm_i, 1]
+        #
+        #     self.T[arm_i,1,1,1] = param
+        #     self.T[arm_i,1,1,0] = 1-param
 
-            if param < self.sampled_parameter_ranges[arm_i, 0]:
-                print("Warning! nature action below allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i]))
-                print("Setting to lower bound of range...")
-                param = self.sampled_parameter_ranges[arm_i, 0]
-            elif param > self.sampled_parameter_ranges[arm_i, 1]:
-                print("Warning! nature action above allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i]))
-                print("Setting to upper bound of range...")
-                param = self.sampled_parameter_ranges[arm_i, 1]
-            
-            self.T[arm_i,1,1,1] = param
-            self.T[arm_i,1,1,0] = 1-param
-
-
+        # need to communicate this transition matrix T with the agent oracle, for feature-based model
 
         ###### Get next state
         next_full_state = np.zeros(self.N, dtype=int)

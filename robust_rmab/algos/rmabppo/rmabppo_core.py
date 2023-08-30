@@ -128,12 +128,16 @@ def list_valid_action_combinations(N,C,B,options):
 class MLPActorCriticRMAB(nn.Module):
 
 
-    def __init__(self, observation_space, action_space, 
-                 hidden_sizes=(64,64), C=None, N=None, B=None,
+    def __init__(self, observation_space, action_space, transition_prob_arr=[], opt_in=[],
+                 hidden_sizes=(64,64), input_feat_dim=4, C=None, N=None, B=None,
                  strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
                  state_norm=None,
-                 activation=nn.Tanh):
+                 activation=nn.Tanh
+                 ):
         super().__init__()
+
+        self.transition_prob_arr = transition_prob_arr
+        self.opt_in = np.ones(N) # assume all arms opt-in at the start
 
         # one-hot-encode the states for now
         self.obs_dim = observation_space.shape[0]
@@ -148,9 +152,9 @@ class MLPActorCriticRMAB(nn.Module):
         # we will only work with discrete actions
         self.act_dim = action_space.shape[0]
 
-        self.pi_list = np.zeros(N,dtype=object)
-        self.v_list = np.zeros(N,dtype=object)
-        self.q_list = np.zeros(N,dtype=object)
+        # self.pi_list = np.zeros(N,dtype=object)
+        # self.v_list = np.zeros(N,dtype=object)
+        # self.q_list = np.zeros(N,dtype=object)
         self.N = N
         self.C = C
         self.B = B
@@ -158,31 +162,49 @@ class MLPActorCriticRMAB(nn.Module):
         self.activation = activation
         self.state_norm = state_norm
 
-        for i in range(N):
-            self.pi_list[i] = MLPCategoricalActor(self.obs_dim+1, self.act_dim, hidden_sizes, activation)
-            self.v_list[i]  = MLPCritic(self.obs_dim+1, hidden_sizes, activation)
-            self.q_list[i] = MLPQCritic(self.obs_dim+1, self.act_dim, hidden_sizes, activation)
+        self.input_feat_dim = input_feat_dim
+        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
+        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, hidden_sizes, activation)
+        self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
 
         # Lambda_net is currently expected one input per arm, but other
         # networks are one-hot encoding the states...
         # This leads to a dimension difference...
         # need to change this eventually
-        lambda_hidden_sizes = [8,8]
+        lambda_hidden_sizes = [8, 8]
         self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
 
         self.name = "RMABPPO"
         self.ind = strat_ind
 
+    # def update_transition_probs(self, transition_probs_input):
+    #     # assume states are (0,1) and actions are (0,1). so transition probabilities can be encode by 4 numbers
+    #     # input is 1d array of length N
+    #     # output is 2d array of shape (N, 4)
+    #     # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
+    #     self.transition_prob_arr = np.zeros((self.N, 4))
+    #     for i in range(self.N):
+    #         self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
+
+    def update_opt_in(self):
+        # randomly choose arms to opt-out. randomly choose some opt-out states to opt-in again
+        opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
+        # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
+        next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
+        new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
+        new_arms_indices = ((new_opt_in - self.opt_in) > 0.5).astype(float)
+        self.opt_in = new_opt_in
+        return new_arms_indices
 
     def __repr__(self):
         return "%s_%i"%(self.name, self.ind)
 
 
     def reset_actor_and_critic_networks(self):
-        for i in range(self.N):
-            self.pi_list[i] = MLPCategoricalActor(self.obs_dim+1, self.act_dim, self.hidden_sizes, self.activation)
-            self.v_list[i]  = MLPCritic(self.obs_dim+1, self.hidden_sizes, self.activation)
-            self.q_list[i] = MLPQCritic(self.obs_dim+1, self.act_dim, self.hidden_sizes, self.activation)
+        # for now, we hardcode dim + 4 for transition prob.
+        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
+        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, self.hidden_sizes, self.activation)
+        self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
 
 
     def return_large_lambda_loss(self, obs, gamma):
@@ -201,45 +223,38 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             a_list = np.zeros(self.N,dtype=int)
-            v_list = np.zeros(self.N)
+            v_list = np.zeros(self.N) # not to confuse with self.v_list
             logp_a_list = np.zeros(self.N)
             q_list = np.zeros(self.N)
             a1_probs = np.zeros(self.N)
-            # a1_probs = np.zeros(self.N)
 
             for i in range(self.N):
-
+                transition_prob = self.transition_prob_arr[i]
+                # need to define transition prob for each arm. maybe hardcode for each arm for now
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
 
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
-                pi = self.pi_list[i]._distribution(full_obs)
+                pi = self.pi_list._distribution(full_obs)
                 a = pi.sample()
                 a1_probs[i] = pi.probs.numpy()[1]
-                logp_a = self.pi_list[i]._log_prob_from_distribution(pi, a)
-                v = self.v_list[i](full_obs)
-                # print(logp_a)
-                # print(obs, pi.probs, a, v)
-                # print(pi.probs)
-                # print(obs)
-                # print(a)
-                # print(pi.sample())
-                # print(pi.sample())
-                # print('above this!')
-                # oha = np.zeros(self.act_dim)
-                # oha[int(a)] = 1
-                # x = torch.as_tensor(np.concatenate([full_obs, oha]), dtype=torch.float32)
-                # q = self.q_list[i](x)
+                logp_a = self.pi_list._log_prob_from_distribution(pi, a)
+                # logp_a is log of probability of choosing this action.
+                # if a=1, then logp_a=log(a1_probs[i]); else, logp_a=log(1-a1_probs[i])
+                v = self.v_list(full_obs)
+                if self.opt_in[i] < 0.5:
+                    a = torch.tensor(0) # not pull
+                    a1_probs[i] = 0.1 # prob of pulling is near zero
+                    logp_a = torch.tensor(np.log(0.1)) # log(0) is undefined, so we use log(0.1)
 
                 a_list[i] = a.numpy()
                 v_list[i] = v.numpy()
                 logp_a_list[i] = logp_a.numpy()
-                # q_list[i] = q.numpy()
 
         return a_list, v_list, logp_a_list, q_list, a1_probs
 
@@ -251,16 +266,17 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb], transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb], transition_prob])
 
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
-                pi = self.pi_list[i]._distribution(full_obs)
+                pi = self.pi_list._distribution(full_obs)
                 prob_a_list[i] = pi.probs[1]
                
 
@@ -269,7 +285,7 @@ class MLPActorCriticRMAB(nn.Module):
         
 
     def act(self, obs, lamb):
-        a = self.step(obs, lamb)[0]
+        a = self.step(obs, lamb, self.transition_prob)[0]
         return a
 
     def act_test(self, obs):
@@ -298,17 +314,18 @@ class MLPActorCriticRMAB(nn.Module):
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
 
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
 
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                pi = self.pi_list[i]._distribution(full_obs).probs.detach().numpy()
+                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
 
             # play the actions with the largest probs
@@ -347,18 +364,20 @@ class MLPActorCriticRMAB(nn.Module):
 
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
 
+
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 # print(full_obs)
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                pi = self.pi_list[i]._distribution(full_obs).probs.detach().numpy()
+                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
                 # print(pi)
 
@@ -384,7 +403,8 @@ class MLPActorCriticRMAB(nn.Module):
                 while i < self.N:
                     arm = row_order[i]
                     arm_a = pi_arg_maxes[row_order[i]][-1]
-
+                    if self.opt_in[i] < 0.5:
+                        arm_a = 0 # 'no pull' action for opt-out arms.
                     a_cost = self.C[arm_a]
                     
                     # if difference in price takes us over, we have to stop
@@ -458,16 +478,17 @@ class MLPActorCriticRMAB(nn.Module):
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
 
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                pi = self.pi_list[i]._distribution(full_obs).probs.detach().numpy()
+                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
 
             
@@ -490,16 +511,17 @@ class MLPActorCriticRMAB(nn.Module):
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
 
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                pi = self.pi_list[i]._distribution(full_obs).probs.detach().numpy()
+                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
 
             # play the actions with the largest probs
@@ -548,16 +570,17 @@ class MLPActorCriticRMAB(nn.Module):
             lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
 
             for i in range(self.N):
+                transition_prob = self.transition_prob_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
                     ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb]])
+                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
                 else:
-                    full_obs = np.concatenate([[obs[i]],[lamb]])
+                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                pi = self.pi_list[i]._distribution(full_obs).probs.detach().numpy()
+                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
 
             # play the actions with the largest probs
