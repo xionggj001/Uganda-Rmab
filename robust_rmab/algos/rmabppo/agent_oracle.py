@@ -544,7 +544,8 @@ class AgentOracle:
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
                         ac.transition_prob_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
-
+                # featurization
+                ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
                 lambda_net_input = np.concatenate((o, ac.transition_prob_arr.flatten()))
                 current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
                 # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
@@ -562,12 +563,14 @@ class AgentOracle:
                 # a_nature is 1d array of length N, encoding the transition probs
                 # a_nature = nature_pol.get_nature_action(torch_o)
                 # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
+
+                # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
                 # update the transition probabilities input
-                T_matrix = env.T
-                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
-                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                ac.transition_prob_arr = T_matrix # this update can accomodate different env
-                ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"]) 
+                # T_matrix = env.T
+                # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                # ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                # ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
 
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 

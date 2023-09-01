@@ -137,7 +137,7 @@ class MLPActorCriticRMAB(nn.Module):
                  ):
         super().__init__()
 
-        self.transition_prob_arr = transition_prob_arr
+        self.transition_prob_arr = np.zeros((N, input_feat_dim))
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
 
         # one-hot-encode the states for now
@@ -173,7 +173,7 @@ class MLPActorCriticRMAB(nn.Module):
         # This leads to a dimension difference...
         # need to change this eventually
         lambda_hidden_sizes = [8, 8]
-        transition_prob_dim = int(N * self.act_dim * self.obs_dim * (self.obs_dim - 1)) # 'obs_dim - 1' because probabilities sum to 1
+        transition_prob_dim = int(N * input_feat_dim)
         self.lambda_net = MLPLambdaNet(N + transition_prob_dim, lambda_hidden_sizes, activation)
         # self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
 
