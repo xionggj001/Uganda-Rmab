@@ -518,6 +518,9 @@ class AgentOracle:
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                for arm_index in range(N):
+                    if ac.opt_in[arm_index] < 0.5:
+                        ac.transition_prob_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
 
                 lambda_net_input = np.concatenate((o, ac.transition_prob_arr.flatten()))
                 current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
@@ -661,6 +664,7 @@ class AgentOracle:
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix
+
 
                 a_agent  = agent_pol.act_test(torch_o)
                 # next_o, r, d, _ = env.step(a_agent, a_nature_env)
