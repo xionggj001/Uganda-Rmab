@@ -428,7 +428,9 @@ class AgentOracle:
             obs = data['obs'][0]
             if not self.one_hot_encode:
                 obs = obs/self.state_norm
-            lamb = ac.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, ac.transition_prob_arr.flatten()))
+            lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
+            # lamb = ac.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             # print('lamb',lamb, 'term 1', env.B/(1-gamma), 'cost',disc_cost, 'diff', env.B/(1-gamma) - disc_cost)
             # print('term 1', , 'cost',disc_cost)
             # print('term 1',env.B/(1-gamma))
@@ -535,7 +537,17 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
+                T_matrix = env.T
+                T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+                ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                for arm_index in range(N):
+                    if ac.opt_in[arm_index] < 0.5:
+                        ac.transition_prob_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
+
+                lambda_net_input = np.concatenate((o, ac.transition_prob_arr.flatten()))
+                current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
+                # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
                 logger.store(Lamb=current_lamb)
 
 
@@ -676,6 +688,7 @@ class AgentOracle:
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix
+
 
                 a_agent  = agent_pol.act_test(torch_o)
                 # next_o, r, d, _ = env.step(a_agent, a_nature_env)

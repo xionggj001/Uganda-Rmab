@@ -107,12 +107,13 @@ class MLPQCritic(nn.Module):
 
 class MLPLambdaNet(nn.Module):
 
-    def __init__(self, obs_dim, hidden_sizes, activation):
+    def __init__(self, input_dim, hidden_sizes, activation):
         super().__init__()
-        self.lambda_net = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
-    def forward(self, obs):
-        return torch.squeeze(self.lambda_net(obs), -1) 
+        self.lambda_net = mlp([input_dim] + list(hidden_sizes) + [1], activation)
+
+    def forward(self, input): # input should be obs and transition probabilities
+        return torch.squeeze(self.lambda_net(input), -1)
 
 
 # @jit(nopython=True)
@@ -172,7 +173,9 @@ class MLPActorCriticRMAB(nn.Module):
         # This leads to a dimension difference...
         # need to change this eventually
         lambda_hidden_sizes = [8, 8]
-        self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
+        transition_prob_dim = int(N * self.act_dim * self.obs_dim * (self.obs_dim - 1)) # 'obs_dim - 1' because probabilities sum to 1
+        self.lambda_net = MLPLambdaNet(N + transition_prob_dim, lambda_hidden_sizes, activation)
+        # self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
 
         self.name = "RMABPPO"
         self.ind = strat_ind
@@ -212,7 +215,9 @@ class MLPActorCriticRMAB(nn.Module):
     def return_large_lambda_loss(self, obs, gamma):
 
         disc_cost = 2 * self.B/(1-gamma)
-        lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+        # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+        lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+        lamb = self.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
 
         loss = lamb*(self.B/(1-gamma) - disc_cost)
 
@@ -300,7 +305,9 @@ class MLPActorCriticRMAB(nn.Module):
         obs = obs.reshape(-1)
         if not self.one_hot_encode:
             obs = obs/self.state_norm
-        lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+        # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+        lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+        lamb = self.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
         return lamb.detach().numpy()
 
     # Currently only implemented for binary action
@@ -313,7 +320,9 @@ class MLPActorCriticRMAB(nn.Module):
             if not self.one_hot_encode:
                 obs = obs/self.state_norm
 
-            lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
                 transition_prob = self.transition_prob_arr[i]
@@ -364,7 +373,9 @@ class MLPActorCriticRMAB(nn.Module):
             if not self.one_hot_encode:
                 obs = obs/self.state_norm
 
-            lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
 
             for i in range(self.N):
@@ -477,7 +488,9 @@ class MLPActorCriticRMAB(nn.Module):
             if not self.one_hot_encode:
                 obs = obs/self.state_norm
 
-            lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
                 transition_prob = self.transition_prob_arr[i]
@@ -510,7 +523,9 @@ class MLPActorCriticRMAB(nn.Module):
             if not self.one_hot_encode:
                     obs = obs/self.state_norm 
 
-            lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
                 transition_prob = self.transition_prob_arr[i]
@@ -569,7 +584,9 @@ class MLPActorCriticRMAB(nn.Module):
             if not self.one_hot_encode:
                     obs = obs/self.state_norm 
 
-            lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
+            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
                 transition_prob = self.transition_prob_arr[i]
