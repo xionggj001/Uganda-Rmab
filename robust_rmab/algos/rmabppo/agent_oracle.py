@@ -17,7 +17,7 @@ from robust_rmab.utils.logx import EpochLogger
 from robust_rmab.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from robust_rmab.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
-from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv
+from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
 
 
 
@@ -211,6 +211,9 @@ class AgentOracle:
         if data == 'sis':
             self.env_fn = lambda : SISRobustEnv(N,B,pop_size,seed)
 
+        if data == 'continuous_state':
+            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed)
+
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
 
@@ -219,7 +222,7 @@ class AgentOracle:
         # this won't work if we go back to MPI, but doing it now to simplify seeding
         self.env = self.env_fn()
         self.env.seed(seed)
-        self.env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+        # self.env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
 
 
     # Todo - figure out parallelization with MPI -- not clear how to do this yet, so restrict to single cpu
@@ -765,14 +768,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
-    parser.add_argument('-d', '--data', default='counterexample', type=str, help='Environment selection',
+    parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
                         choices=[   
                                     'random',
                                     'random_reset',
                                     'circulant', 
                                     'armman',
                                     'counterexample',
-                                    'sis'
+                                    'sis',
+                                    'continuous_state'
                                 ])
 
     parser.add_argument('--robust_keyword', default='pess', type=str, help='Method for picking some T out of the uncertain environment',
@@ -840,6 +844,9 @@ if __name__ == '__main__':
                 )
         env_fn = lambda : CounterExampleRobustEnv(N,B,seed)
 
+    if args.data == 'continuous_state':
+        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed)
+
     if args.data == 'armman':
         from robust_rmab.baselines.nature_baselines_armman import   (
                             RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
@@ -861,9 +868,10 @@ if __name__ == '__main__':
 
 
     env = env_fn()
-    sampled_nature_parameter_ranges = env.sample_parameter_ranges()
+    #  seems we don't need the line below for DDLPO
+    # sampled_nature_parameter_ranges = env.sample_parameter_ranges()
     # important to make sure these are always the same for all instatiations of the env
-    env.sampled_parameter_ranges = sampled_nature_parameter_ranges
+    # env.sampled_parameter_ranges = sampled_nature_parameter_ranges
 
     agent_oracle  = AgentOracle(data, N, S, A, budget, seed, reward_bound,
                              agent_kwargs=agent_kwargs, home_dir=home_dir, exp_name=exp_name,

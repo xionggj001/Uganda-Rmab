@@ -738,21 +738,13 @@ class ARMMANRobustEnv(gym.Env):
         return [seed1]
 
 
-
-
-
-
-
-
-
-
 class CounterExampleRobustEnv(gym.Env):
-    def __init__(self, N, B, seed):#, REWARD_BOUND):
+    def __init__(self, N, B, seed):  # , REWARD_BOUND):
 
         S = 2
         A = 2
         # N = 3
-        assert N%3 == 0
+        assert N % 3 == 0
 
         self.N = N
         self.observation_space = np.arange(S)
@@ -767,15 +759,13 @@ class CounterExampleRobustEnv(gym.Env):
         self.B = B
         self.init_seed = seed
 
-
         self.current_full_state = np.zeros(N)
         self.random_stream = np.random.RandomState()
 
         self.PARAMETER_RANGES = self.get_parameter_ranges(self.N)
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
-        self.sampled_parameter_ranges = None 
-
+        self.sampled_parameter_ranges = None
 
         self.seed(seed=seed)
         self.T, self.R, self.C = self.get_experiment(N)
@@ -783,12 +773,10 @@ class CounterExampleRobustEnv(gym.Env):
         self.tanh = torch.nn.Tanh()
         self.sigmoid = torch.nn.Sigmoid()
 
-
-
     # new version has one range per state, per action
     # We will sample ranges from within these to get some extra randomness
     def get_parameter_ranges(self, N):
-        
+
         # A - 10 in A - 0, middle
         rangeA = [0, 1]
 
@@ -800,40 +788,38 @@ class CounterExampleRobustEnv(gym.Env):
         rangeC = [0.1, 0.95]
         # rangeC = [0.35, 0.95] # nudge the middle a bit higher so RL learns the middle policy exactly
 
-
         parameter_ranges = []
 
         i = 0
         while i < N:
-            if i%3 == 0:
+            if i % 3 == 0:
                 parameter_ranges.append(rangeA)
-            if i%3 == 1:
+            if i % 3 == 1:
                 parameter_ranges.append(rangeB)
-            if i%3 == 2:
+            if i % 3 == 2:
                 parameter_ranges.append(rangeC)
-            i+=1
+            i += 1
 
         # self.parameter_ranges = np.array(parameter_ranges)
 
         return np.array(parameter_ranges)
-
 
     def sample_parameter_ranges(self):
 
         return np.copy(self.PARAMETER_RANGES)
 
     def get_experiment(self, N):
-        
+
         # States go S, P, L
-        # 
+        #
 
         # A - 10 in A
-        t = np.array([[ [0.5, 0.5], 
-                        [0.5, 0.5]],
+        t = np.array([[[0.5, 0.5],
+                       [0.5, 0.5]],
 
-                       [[1.0, 0.0],
-                        [0.0, -1.]] # only set the param for acting in state 1 
-                     ])
+                      [[1.0, 0.0],
+                       [0.0, -1.]]  # only set the param for acting in state 1
+                      ])
 
         T = []
         for i in range(N):
@@ -842,7 +828,6 @@ class CounterExampleRobustEnv(gym.Env):
         T = np.array(T)
         R = np.array([[0, 1] for _ in range(N)])
         C = np.array([0, 1])
-
 
         return T, R, C
 
@@ -859,8 +844,8 @@ class CounterExampleRobustEnv(gym.Env):
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
-                self.T[i, :, :, 0] = new_transition_probs.reshape((2,2))
-                self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2,2))
+                self.T[i, :, :, 0] = new_transition_probs.reshape((2, 2))
+                self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2, 2))
 
     # env has only binary actions so random is easy to generate
     def random_agent_action(self):
@@ -868,7 +853,6 @@ class CounterExampleRobustEnv(gym.Env):
         choices = np.random.choice(np.arange(self.N), int(self.B), replace=False)
         actions[choices] = 1
         return actions
-
 
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
@@ -897,12 +881,13 @@ class CounterExampleRobustEnv(gym.Env):
         next_full_state = np.zeros(self.N, dtype=int)
         rewards = np.zeros(self.N)
         for i in range(self.N):
-            current_arm_state=int(self.current_full_state[i])
-            next_arm_state=np.argmax(self.random_stream.multinomial(1, self.T[i, current_arm_state, int(a_agent[i]), :]))
-            next_full_state[i]=next_arm_state
-            rewards[i] = self.R[i, next_arm_state]
+            current_arm_state = int(self.current_full_state[i])
+            next_arm_state = np.argmax(
+                self.random_stream.multinomial(1, self.T[i, current_arm_state, int(a_agent[i]), :]))
+            next_full_state[i] = next_arm_state
             if opt_in[i] < 0.5:
-                next_full_state[i] = 0 # opt-out arms have dummy state
+                next_full_state[i] = 0  # opt-out arms have dummy state
+            rewards[i] = self.R[i, next_arm_state]
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
@@ -918,39 +903,38 @@ class CounterExampleRobustEnv(gym.Env):
             param = a_nature_expanded[arm_i]
 
             if param < self.sampled_parameter_ranges[arm_i, 0] or param > self.sampled_parameter_ranges[arm_i, 1]:
-                raise ValueError("Nature setting outside allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i]))
+                raise ValueError("Nature setting outside allowed param range. Was %s but should be in %s" % (
+                param, self.sampled_parameter_ranges[arm_i]))
                 # print("Warning! nature action below allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i, arm_state, arm_a]))
                 # print("Setting to lower bound of range...")
                 # param = self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]
 
-            self.T[arm_i,1,1,1] = param
-            self.T[arm_i,1,1,0] = 1-param
+            self.T[arm_i, 1, 1, 1] = param
+            self.T[arm_i, 1, 1, 0] = 1 - param
 
         return np.copy(self.T)
-
 
     # this is easier to attach to environment code
     # RETUNR HERE WHEN DONE
     def bound_nature_actions(self, a_nature_flat, state=None, reshape=True):
-        
+
         # num arms by num actions
-        a_nature = a_nature_flat.reshape(self.N)    
+        a_nature = a_nature_flat.reshape(self.N)
 
         a_nature_bounded = np.zeros(a_nature.shape)
         for arm_i in range(a_nature.shape[0]):
-            
             param = a_nature[arm_i]
 
             lb = self.sampled_parameter_ranges[arm_i, 0]
             ub = self.sampled_parameter_ranges[arm_i, 1]
 
-            a_nature_bounded[arm_i] = ((self.tanh(torch.as_tensor(param, dtype=torch.float32))+1)/2)*(ub - lb) + lb
+            a_nature_bounded[arm_i] = ((self.tanh(torch.as_tensor(param, dtype=torch.float32)) + 1) / 2) * (
+                        ub - lb) + lb
 
         if not reshape:
             a_nature_bounded = a_nature_bounded.reshape(*a_nature_flat.shape)
 
         return a_nature_bounded
-
 
     def reset_random(self):
         return self.reset()
@@ -958,6 +942,141 @@ class CounterExampleRobustEnv(gym.Env):
     def reset(self):
         # self.current_full_state = np.zeros(self.N, dtype=int)
         self.current_full_state = self.random_stream.choice(self.observation_space, self.N)
+        return self.current_full_state.reshape(self.N, self.observation_dimension)
+
+    def render(self):
+        return None
+
+    def close(self):
+        pass
+
+    def seed(self, seed=None):
+        seed1 = seed
+        if seed1 is not None:
+            self.random_stream.seed(seed=seed1)
+            # print('seeded with',seed1)
+        else:
+            seed1 = np.random.randint(1e9)
+            self.random_stream.seed(seed=seed1)
+
+        return [seed1]
+
+
+
+
+
+class ContinuousStateExampleEnv(gym.Env):
+    def __init__(self, N, B, seed):#, REWARD_BOUND):
+
+        S = 2
+        A = 2
+        # N = 3
+        assert N%3 == 0
+
+        self.N = N
+        self.observation_space = np.arange(S)
+        self.action_space = np.arange(A)
+        self.observation_dimension = 1
+        self.action_dimension = 1
+        self.action_dim_nature = N
+        self.S = S
+        self.A = A
+        self.B = B
+        self.init_seed = seed
+
+
+        self.current_full_state = np.zeros(N)
+        self.random_stream = np.random.RandomState()
+
+        # make sure to set this whenever environment is created, but do it outside so it always the same
+        self.sampled_parameter_ranges = None 
+
+
+        self.seed(seed=seed)
+        self.T, self.R, self.C = self.get_experiment(N)
+
+        self.tanh = torch.nn.Tanh()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def get_experiment(self, N):
+        
+        # States go S, P, L
+        # 
+
+        # when current state is j and action is i, state moves according to N(T[j,i,0], T[j,i,1])
+        # similar to CounterExampleRobustEnv, if current state is 0 and action is 0, the next state will be 0 with very high prob
+        # set std to be 0.2 for all. so we don't need to pass in these numbers
+        t = np.array([[ [-0.2, 0.2],
+                        [0.2, 0.2]],
+
+                       [[-0.5, 0.2],
+                        [0.5, 0.2]]
+                     ])
+
+        T = []
+        for i in range(N):
+            T.append(t)
+
+        T = np.array(T)
+        C = np.array([0, 1])
+
+        return T, R, C
+
+
+    def reward_fun(self, state):
+        return state
+
+
+    def update_transition_probs(self, arms_to_update):
+        # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
+        # t = np.array([[[-0.2, 0.2],
+        #                [0.2, 0.2]],
+        #
+        #               [[-0.5, 0.2],
+        #                [0.5, 0.2]]
+        #               ])
+        sample_ub = [-0.1, 0.3, -0.4, 0.6]
+        sample_lb = [-0.3, 0.1, -0.6, 0.4]
+        for i in range(self.N):
+            if arms_to_update[i] > 0.5:
+                new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
+                self.T[i, :, :, 0] = new_transition_probs.reshape((2,2))
+                # keep std the same. only need to update the means of Gaussian
+                # self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2,2))
+
+    # env has only binary actions so random is easy to generate
+    def random_agent_action(self):
+        actions = np.zeros(self.N)
+        choices = np.random.choice(np.arange(self.N), int(self.B), replace=False)
+        actions[choices] = 1
+        return actions
+
+
+    def step(self, a_agent, opt_in, a_nature=[]):
+        ###### Get next state
+        next_full_state = np.zeros(self.N, dtype=int)
+        rewards = np.zeros(self.N)
+        for i in range(self.N):
+            current_arm_state=int(self.current_full_state[i])
+            next_arm_state = current_arm_state + self.random_stream.normal(loc=self.T[i, :, :, 0], scale=self.T[i, :, :, 1])
+            # bound the states
+            next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
+            next_full_state[i] = next_arm_state
+            if opt_in[i] < 0.5:
+                next_full_state[i] = 0  # opt-out arms have dummy state
+            rewards[i] = self.reward_fun(next_arm_state)
+
+        self.current_full_state = next_full_state
+        next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
+
+        return next_full_state, rewards, False, None
+
+    def reset_random(self):
+        return self.reset()
+
+    def reset(self):
+        # self.current_full_state = np.zeros(self.N, dtype=int)
+        self.current_full_state = self.random_stream.uniform(low=[0] * self.N, high=[1] * self.N)
         return self.current_full_state.reshape(self.N, self.observation_dimension)
 
     def render(self):
