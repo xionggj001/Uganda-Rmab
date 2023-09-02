@@ -876,19 +876,19 @@ if __name__ == '__main__':
     agent_oracle  = AgentOracle(data, N, S, A, budget, seed, reward_bound,
                              agent_kwargs=agent_kwargs, home_dir=home_dir, exp_name=exp_name,
                              robust_keyword=args.robust_keyword,
-                             sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
+                             # sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
                              pop_size=args.pop_size, one_hot_encode=one_hot_encode, state_norm=state_norm,
                              non_ohe_obs_dim=non_ohe_obs_dim)
 
     nature_strategy = None
-    if args.robust_keyword == 'mid':
-        nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-    if args.robust_keyword == 'sample_random':
-        nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-        # init the random strategy
-        nature_strategy.sample_param_setting(seed)
+    # if args.robust_keyword == 'mid':
+    #     nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
+    #
+    # if args.robust_keyword == 'sample_random':
+    #     nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
+    #
+    #     # init the random strategy
+    #     nature_strategy.sample_param_setting(seed)
 
 
 

@@ -1003,14 +1003,14 @@ class ContinuousStateExampleEnv(gym.Env):
         # States go S, P, L
         # 
 
-        # when current state is j and action is i, state moves according to N(T[j,i,0], T[j,i,1])
+        # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
         # similar to CounterExampleRobustEnv, if current state is 0 and action is 0, the next state will be 0 with very high prob
         # set std to be 0.2 for all. so we don't need to pass in these numbers
-        t = np.array([[ [-0.2, 0.2],
-                        [0.2, 0.2]],
+        t = np.array([[ [-0.4, 0.0],
+                        [0.2, 0.0]],
 
-                       [[-0.5, 0.2],
-                        [0.5, 0.2]]
+                       [[0.4, 0.0],
+                        [0.2, 0.0]]
                      ])
 
         T = []
@@ -1019,6 +1019,7 @@ class ContinuousStateExampleEnv(gym.Env):
 
         T = np.array(T)
         C = np.array([0, 1])
+        R = 0 # dummy value. use the reward_fun below instead
 
         return T, R, C
 
@@ -1029,14 +1030,14 @@ class ContinuousStateExampleEnv(gym.Env):
 
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        # t = np.array([[[-0.2, 0.2],
-        #                [0.2, 0.2]],
+        # t = np.array([[ [-0.4, 0.0],
+        #                 [0.2, 0.0]],
         #
-        #               [[-0.5, 0.2],
-        #                [0.5, 0.2]]
-        #               ])
-        sample_ub = [-0.1, 0.3, -0.4, 0.6]
-        sample_lb = [-0.3, 0.1, -0.6, 0.4]
+        #                [[0.4, 0.0],
+        #                 [0.2, 0.0]]
+        #              ])
+        sample_ub = [-0.3, 0.3, 0.5, 0.3]
+        sample_lb = [-0.5, 0.1, 0.3, 0.1]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -1058,9 +1059,13 @@ class ContinuousStateExampleEnv(gym.Env):
         rewards = np.zeros(self.N)
         for i in range(self.N):
             current_arm_state=int(self.current_full_state[i])
-            next_arm_state = current_arm_state + self.random_stream.normal(loc=self.T[i, :, :, 0], scale=self.T[i, :, :, 1])
+            action = a_agent[i]
+            # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
+            next_arm_state = current_arm_state + self.random_stream.normal(
+                loc=self.T[i, action, 0, 0], scale=self.T[i, action, 1, 0])
             # bound the states
             next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
+            breakpoint()
             next_full_state[i] = next_arm_state
             if opt_in[i] < 0.5:
                 next_full_state[i] = 0  # opt-out arms have dummy state
