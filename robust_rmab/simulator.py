@@ -5,7 +5,7 @@ import time
 from itertools import product
 
 from robust_rmab.environments.bandit_env import SISBanditEnv, RandomBanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
-from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT
+from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT, ContinuousStateExampleEnv
 
 import os
 import os.path as osp
@@ -589,7 +589,8 @@ if __name__=="__main__":
                                         'toy_robust',
                                         'armman',
                                         'counterexample',
-                                        'sis'
+                                        'sis',
+                                        'continuous_state'
                                     ])
 
     parser.add_argument('-me', '--mdp_epsilon', default=1e-1, type=float, help='Tolerance for Value Iteration')
@@ -858,6 +859,11 @@ if __name__=="__main__":
 
         env = RobustEnvWrapper(env, nature_actions)
 
+    if args.data == 'continuous_state':
+        env = ContinuousStateExampleEnv(N, B, seedbase)
+        T = env.T
+        R = env.R
+        C = env.C
 
     if args.data == 'counterexample':
         from robust_rmab.baselines.nature_baselines_counterexample import   (
@@ -865,7 +871,6 @@ if __name__=="__main__":
                     OptimisticNaturePolicy, DetermNaturePolicy, SampledRandomNaturePolicy
                 )
         env_fn = lambda : CounterExampleRobustEnv(N,B,seedbase)
-
 
         env = env_fn()
         sampled_nature_parameter_ranges = env.sample_parameter_ranges()

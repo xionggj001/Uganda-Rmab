@@ -1036,8 +1036,9 @@ class ContinuousStateExampleEnv(gym.Env):
         #                [[0.4, 0.0],
         #                 [0.2, 0.0]]
         #              ])
-        sample_ub = [-0.3, 0.3, 0.5, 0.3]
-        sample_lb = [-0.5, 0.1, 0.3, 0.1]
+        # 'good arms' state will increase a lot when pulled
+        sample_ub = [-0.3, 0.3, 0.8, 0.3]
+        sample_lb = [-0.5, 0.1, 0.2, 0.1]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -1058,14 +1059,14 @@ class ContinuousStateExampleEnv(gym.Env):
         next_full_state = np.zeros(self.N, dtype=int)
         rewards = np.zeros(self.N)
         for i in range(self.N):
-            current_arm_state=int(self.current_full_state[i])
+            # current_arm_state=int(self.current_full_state[i])
+            current_arm_state = self.current_full_state[i] # want continuous states. not rounded
             action = a_agent[i]
             # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
             next_arm_state = current_arm_state + self.random_stream.normal(
                 loc=self.T[i, action, 0, 0], scale=self.T[i, action, 1, 0])
             # bound the states
             next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
-            breakpoint()
             next_full_state[i] = next_arm_state
             if opt_in[i] < 0.5:
                 next_full_state[i] = 0  # opt-out arms have dummy state
