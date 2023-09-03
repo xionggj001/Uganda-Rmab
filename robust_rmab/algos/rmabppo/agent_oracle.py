@@ -723,7 +723,6 @@ class AgentOracle:
 
 
         rewards = rewards.sum(axis=1).mean()
-        print("Rewards:", rewards)
 
 
         return rewards

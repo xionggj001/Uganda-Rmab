@@ -72,9 +72,10 @@ def barPlot(labels, values, errors, ylabel='Mean Discounted Reward',
 
 
 class RobustEnvWrapper():
-    def __init__(self, env, nature_params):
-
-        self.nature_params = nature_params
+    def __init__(self, env, params):
+        # params is either nature_params or opt_in.
+        # when we have changing # arms, params is opt_in
+        self.params = params
         self.env = env
 
         # loop over the attributes of the parent class and create those for the decorator
@@ -89,7 +90,7 @@ class RobustEnvWrapper():
         return self.env.reset_random()
 
     def step(self, actions):
-        return self.env.step(actions, self.nature_params)
+        return self.env.step(actions, self.params)
 
 class RobustEnvWrapperArmman():
     def __init__(self, env, nature_policy):
@@ -864,6 +865,8 @@ if __name__=="__main__":
         T = env.T
         R = env.R
         C = env.C
+        env = RobustEnvWrapper(env, [1] * N) # here the second argument is opt_in decisions.
+        # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'counterexample':
         from robust_rmab.baselines.nature_baselines_counterexample import   (
@@ -891,9 +894,6 @@ if __name__=="__main__":
 
             T = env.get_T_for_a_nature(sampled_nature_params)
 
-
-        
-
         # N = 3
         # env = CounterExampleRobustEnv(B, seedbase)
         # T = env.T
@@ -902,8 +902,9 @@ if __name__=="__main__":
 
         nature_actions = nature_strategy.get_nature_action(None)
 
-
-        env = RobustEnvWrapper(env, nature_actions)
+        # env = RobustEnvWrapper(env, nature_actions)
+        env = RobustEnvWrapper(env, [1] * N) # here the second argument is opt_in decisions
+        # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'armman':
         from robust_rmab.baselines.nature_baselines_armman import   (

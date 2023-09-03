@@ -1074,6 +1074,7 @@ class ContinuousStateExampleEnv(gym.Env):
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
+        print('rewards', rewards)
 
         return next_full_state, rewards, False, None
 
