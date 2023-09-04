@@ -865,7 +865,7 @@ if __name__=="__main__":
         T = env.T
         R = env.R
         C = env.C
-        env = RobustEnvWrapper(env, [1] * N) # here the second argument is opt_in decisions.
+        env = RobustEnvWrapper(env, np.ones(N)) # here the second argument is opt_in decisions.
         # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'counterexample':

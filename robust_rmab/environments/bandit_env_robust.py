@@ -1006,11 +1006,11 @@ class ContinuousStateExampleEnv(gym.Env):
         # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
         # similar to CounterExampleRobustEnv, if current state is 0 and action is 0, the next state will be 0 with very high prob
         # set std to be 0.2 for all. so we don't need to pass in these numbers
-        t = np.array([[ [-0.4, 0.0],
-                        [0.2, 0.0]],
+        t = np.array([[ [0.0, 0.4],
+                        [0.0, 0.2]],
 
-                       [[0.4, 0.0],
-                        [0.2, 0.0]]
+                       [[0.0, -0.4],
+                        [0.0, 0.2]]
                      ])
 
         T = []
@@ -1030,21 +1030,14 @@ class ContinuousStateExampleEnv(gym.Env):
 
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        # t = np.array([[ [-0.4, 0.0],
-        #                 [0.2, 0.0]],
-        #
-        #                [[0.4, 0.0],
-        #                 [0.2, 0.0]]
-        #              ])
-        # 'good arms' state will increase a lot when pulled
-        sample_ub = [-0.3, 0.3, 0.8, 0.3]
-        sample_lb = [-0.5, 0.1, 0.2, 0.1]
+        sample_ub = [1.0, 0.2, -0.3, 0.2]
+        sample_lb = [0.2, 0.0, -0.5, 0.0]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
-                self.T[i, :, :, 0] = new_transition_probs.reshape((2,2))
+                self.T[i, :, :, 1] = new_transition_probs.reshape((2,2))
                 # keep std the same. only need to update the means of Gaussian
-                # self.T[i, :, :, 1] = 1 - new_transition_probs.reshape((2,2))
+                # self.T[i, :, :, 0] = 1 - new_transition_probs.reshape((2,2))
 
     # env has only binary actions so random is easy to generate
     def random_agent_action(self):
@@ -1061,10 +1054,10 @@ class ContinuousStateExampleEnv(gym.Env):
         for i in range(self.N):
             # current_arm_state=int(self.current_full_state[i])
             current_arm_state = self.current_full_state[i] # want continuous states. not rounded
-            action = a_agent[i]
+            action = int(a_agent[i])
             # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
             next_arm_state = current_arm_state + self.random_stream.normal(
-                loc=self.T[i, action, 0, 0], scale=self.T[i, action, 1, 0])
+                loc=self.T[i, action, 0, 1], scale=self.T[i, action, 1, 1])
             # bound the states
             next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state[i] = next_arm_state
@@ -1074,7 +1067,7 @@ class ContinuousStateExampleEnv(gym.Env):
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
-        print('rewards', rewards)
+        # print('rewards', rewards)
 
         return next_full_state, rewards, False, None
 
