@@ -1006,10 +1006,10 @@ class ContinuousStateExampleEnv(gym.Env):
         # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
         # similar to CounterExampleRobustEnv, if current state is 0 and action is 0, the next state will be 0 with very high prob
         # set std to be 0.2 for all. so we don't need to pass in these numbers
-        t = np.array([[ [0.0, 0.4],
+        t = np.array([[ [0.0, -0.4],
                         [0.0, 0.2]],
 
-                       [[0.0, -0.4],
+                       [[0.0, 0.5],
                         [0.0, 0.2]]
                      ])
 
@@ -1030,8 +1030,8 @@ class ContinuousStateExampleEnv(gym.Env):
 
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        sample_ub = [1.0, 0.2, -0.3, 0.2]
-        sample_lb = [0.2, 0.0, -0.5, 0.0]
+        sample_ub = [-0.3, 0.2, 1.0, 0.2]
+        sample_lb = [-0.5, 0.0, 0.2, 0.0]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
