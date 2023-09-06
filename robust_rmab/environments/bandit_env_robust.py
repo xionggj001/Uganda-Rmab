@@ -999,6 +999,7 @@ class ContinuousStateExampleEnv(gym.Env):
 
         self.seed(seed=seed)
         self.T, self.R, self.C = self.get_experiment(N)
+        self.update_transition_probs(np.ones(self.N))
         self.model_input_T = deepcopy(self.T)
 
         self.tanh = torch.nn.Tanh()
@@ -1007,16 +1008,12 @@ class ContinuousStateExampleEnv(gym.Env):
     def get_experiment(self, N):
         
         # States go S, P, L
-        # 
+        # populate T with dummy values. these will be updated in update_transition_probs
+        t = np.array([[ [0.0, 0.0],
+                        [0.0, 0.0]],
 
-        # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
-        # similar to CounterExampleRobustEnv, if current state is 0 and action is 0, the next state will be 0 with very high prob
-        # set std to be 0.2 for all. so we don't need to pass in these numbers
-        t = np.array([[ [0.0, -0.4],
-                        [0.0, 0.2]],
-
-                       [[0.0, 0.5],
-                        [0.0, 0.2]]
+                       [[0.0, 0.0],
+                        [0.0, 0.0]]
                      ])
 
         T = []
@@ -1036,30 +1033,28 @@ class ContinuousStateExampleEnv(gym.Env):
 
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        # if action==0, then next state = current state + Normal(1st entry, 2nd entry)
-        # if action==1, then next state = current state + Normal(3rd entry, 4th entry)
-        sample_ub = [-0.1, 0.6, 1.0, 0.4]
-        sample_lb = [-0.3, 0.4, 0.2, 0.2]
+        sample_ub = [0.6, 0.6, 0.2, 1.0]
+        sample_lb = [0.4, 0.4, 0.0, 0.2]
         continuous_T = deepcopy(self.T)
         discrete_T = deepcopy(self.T)
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
+                # encodes the Guassian mean of next state
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
                 continuous_T[i, :, :, 1] = new_transition_probs.reshape((2,2))
 
-                # first we note next_state = 1 for discrete state is equivalent to next_state > 0.5 for continuous state
-                # and state = 0 for discrete state is equivalent to state in [0, 0.5) for continuous state (say average is 0.25 for continuous state)
-                # now we proceed to calculate the transition probabilities
-                # prob that next_state > 0.5, when state = 0.25 and action = 1
-                discrete_T[i, 0, 1, 1] = 1 - norm.cdf(0.5 - 0.25, loc=new_transition_probs[2], scale=new_transition_probs[3])
-                # prob that next_state > 0.5, when state = 0.25 and action = 0
-                discrete_T[i, 0, 0, 1] = 1 - norm.cdf(0.5 - 0.25, loc=new_transition_probs[0], scale=new_transition_probs[1])
-                # prob that next_state > 0.5, when state = 0.75 and action = 1
-                discrete_T[i, 1, 1, 1] = 1 - norm.cdf(0.5 - 0.75, loc=new_transition_probs[2], scale=new_transition_probs[3])
-                # prob that next_state > 0.5, when state = 0.75 and action = 0, equals
-                discrete_T[i, 1, 0, 1] = 1 - norm.cdf(0.5 - 0.25, loc=new_transition_probs[0], scale=new_transition_probs[1])
+                # note next_state = 1 for discrete state is equivalent to next_state > 0.5 for continuous state
+                # and current state = 0 for discrete state is equivalent to current state < 0.5 for continuous state
+                # prob that next_state < 0.5, when state = 0 and action = 0
+                discrete_T[i, 0, 0, 0] = norm.cdf(0.5 - new_transition_probs[0], loc=0, scale=0.2)
+                # prob that next_state < 0.5, when state = 0 and action = 1
+                discrete_T[i, 0, 1, 0] = norm.cdf(0.5 - new_transition_probs[1], loc=0, scale=0.2)
+                # prob that next_state < 0.5, when state = 1 and action = 0
+                discrete_T[i, 1, 0, 0] = norm.cdf(0.5 - new_transition_probs[2], loc=0, scale=0.2)
+                # prob that next_state < 0.5, when state = 1 and action = 1
+                discrete_T[i, 1, 1, 0] = norm.cdf(0.5 - new_transition_probs[3], loc=0, scale=0.2)
                 # fill in the other half of of T, using the fact that probabilities sum to 1
-                discrete_T[i, :, :, 0] = 1 - discrete_T[i, :, :, 1]
+                discrete_T[i, :, :, 1] = 1 - discrete_T[i, :, :, 0]
 
         if self.ground_truth == 'discrete':
             self.T = discrete_T
@@ -1090,9 +1085,7 @@ class ContinuousStateExampleEnv(gym.Env):
                     self.random_stream.multinomial(1, self.T[i, current_arm_state, action, :]))
             else:
                 current_arm_state = self.current_full_state[i] # want continuous states. not rounded
-                # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
-                next_arm_state = current_arm_state + self.random_stream.normal(
-                    loc=self.T[i, action, 0, 1], scale=self.T[i, action, 1, 1])
+                next_arm_state = self.random_stream.normal(loc=self.T[i, current_arm_state, action, 1], scale=0.2)
                 # bound the states
                 next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state[i] = next_arm_state
