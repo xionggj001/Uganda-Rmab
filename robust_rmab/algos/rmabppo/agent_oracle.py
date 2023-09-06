@@ -540,7 +540,10 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                T_matrix = env.T
+                if hasattr(env, 'model_input_T'):
+                    T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                else:
+                    T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix # this update can accomodate different env
@@ -569,7 +572,10 @@ class AgentOracle:
 
                 # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
                 # update the transition probabilities input
-                # T_matrix = env.T
+                # if hasattr(env, 'model_input_T'):
+                #     T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                # else:
+                #     T_matrix = env.T
                 # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 # ac.transition_prob_arr = T_matrix # this update can accomodate different env
@@ -690,7 +696,10 @@ class AgentOracle:
 
 
                 # update the transition probabilities input
-                T_matrix = env.T
+                if hasattr(env, 'model_input_T'):
+                    T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                else:
+                    T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix
