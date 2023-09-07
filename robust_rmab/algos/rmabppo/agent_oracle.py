@@ -18,7 +18,7 @@ from robust_rmab.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mp
 from robust_rmab.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
-
+from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 
 class RMABPPO_Buffer:
@@ -305,6 +305,8 @@ class AgentOracle:
         vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
         qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
         lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+        scheduler_lm = ExponentialLR(lambda_optimizer, gamma=0.95) # 0.95 works. try 0.96
+        # scheduler_lm = StepLR(lambda_optimizer, step_size=20, gamma=0.05)
 
         # Set up model saving
         logger.setup_pytorch_saver(ac)
@@ -493,6 +495,7 @@ class AgentOracle:
 
                 # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
                 lambda_optimizer.step()
+                scheduler_lm.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
                 new_arms_indices = ac.update_opt_in()
@@ -625,6 +628,8 @@ class AgentOracle:
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
                         print('opt-in', ac.opt_in)
+                        print('lambda lr', scheduler_lm.get_last_lr()[0])
+                        scheduler_lm.step()
                         # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
@@ -766,10 +771,10 @@ if __name__ == '__main__':
     parser.add_argument('--agent_end_entropy_coeff', type=float, default=0.0, help="End entropy coefficient for the cooling procedure")
     parser.add_argument('--agent_pi_lr', type=float, default=2e-3, help="Learning rate for policy network")
     parser.add_argument('--agent_vf_lr', type=float, default=2e-3, help="Learning rate for critic network")
-    parser.add_argument('--agent_lm_lr', type=float, default=2e-3, help="Learning rate for lambda network")
+    parser.add_argument('--agent_lm_lr', type=float, default=2e-3, help="Learning rate for lambda network") #2e-3
     parser.add_argument('--agent_train_pi_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_train_vf_iters', type=int, default=20, help="Training iterations to run per epoch")
-    parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)")
+    parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)") # 4
     parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
     parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
     parser.add_argument('--pop_size', type=int, default=0)
