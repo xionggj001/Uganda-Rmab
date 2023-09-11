@@ -67,10 +67,6 @@ def barPlot(labels, values, errors, ylabel='Mean Discounted Reward',
     plt.show()
 
 
-
-
-
-
 class RobustEnvWrapper():
     def __init__(self, env, params):
         # params is either nature_params or opt_in.
@@ -112,9 +108,6 @@ class RobustEnvWrapperArmman():
     def step(self, actions):
         a_nature = self.nature_policy.get_nature_action(self.env.current_full_state)
         return self.env.step(actions, a_nature)
-
-
-
 
 
 def takeAction(current_states, T, actions, random_stream):
@@ -581,6 +574,7 @@ if __name__=="__main__":
     parser.add_argument('-A', '--num_actions', default=2, type=int, help='Number of actions per process') # Only two actions implemented for now
     parser.add_argument('-g', '--discount_factor', default=0.9, type=float, help='Discount factor for MDP solvers')
     parser.add_argument('-rb', '--REWARD_BOUND', default=1.0, type=float, help='Maximum reward')
+    parser.add_argument('-opt', '--opt_in_rate', default=1.0, type=float, help='Maximum reward')
 
     parser.add_argument('-d', '--data', default='real', type=str,help='Method for generating transition probabilities',
                             choices=[   'SIS_old',
@@ -750,9 +744,9 @@ if __name__=="__main__":
     S = args.num_states
     A = args.num_actions
     B = int(N*args.budget_frac)
+    opt_in_rate = args.opt_in_rate
     if args.budget is not None:
         B = args.budget
-
     rl_info = {
         'model_file_path_combinatorial':args.rl_combinatorial_model_filepath,
         'model_file_path_rmab':args.rl_rmab_model_filepath,
@@ -861,11 +855,23 @@ if __name__=="__main__":
         env = RobustEnvWrapper(env, nature_actions)
 
     if args.data == 'continuous_state':
-        env = ContinuousStateExampleEnv(N, B, seedbase)
+        env = ContinuousStateExampleEnv(N, B, seedbase, rl_info['data_type'])
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+
         T = env.T
         R = env.R
         C = env.C
-        env = RobustEnvWrapper(env, np.ones(N)) # here the second argument is opt_in decisions.
+
+        
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
+
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'counterexample':
@@ -902,8 +908,16 @@ if __name__=="__main__":
 
         nature_actions = nature_strategy.get_nature_action(None)
 
-        # env = RobustEnvWrapper(env, nature_actions)
-        env = RobustEnvWrapper(env, [1] * N) # here the second argument is opt_in decisions
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
+
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions
         # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'armman':
@@ -1103,8 +1117,11 @@ if __name__=="__main__":
     values_for_df=values_for_df.T
 
     df = pd.DataFrame(values_for_df, columns=labels)
-    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_h%s_data%s_r%s_p%s_s%s.csv'%(savestring, N,args.budget,L,args.data,args.robust_keyword,args.pop_size, seedbase)
-    df.to_csv(fname, index=False)
+    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s_tp-%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate, args.data_type)
+    if os.path.exists(fname):
+        df.to_csv(fname, mode='a', header=False, index=False)
+    else:
+        df.to_csv(fname, index=False)
 
     ##### do some basic plotting if running at the command line with more than one policy
     if args.policy<0:

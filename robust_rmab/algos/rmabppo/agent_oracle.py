@@ -174,7 +174,7 @@ class AgentOracle:
 
     def __init__(self, data, N, S, A, B, seed, REWARD_BOUND, agent_kwargs=dict(),
         home_dir="", exp_name="", sampled_nature_parameter_ranges=None, robust_keyword="",
-        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None):
+        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None, opt_in_rate=None, data_type=""):
 
         self.data = data
         self.home_dir = home_dir
@@ -187,6 +187,7 @@ class AgentOracle:
         self.seed=seed
         self.sampled_nature_parameter_ranges = sampled_nature_parameter_ranges
         self.robust_keyword = robust_keyword
+        self.opt_in_rate = opt_in_rate
 
         self.pop_size = pop_size
         self.one_hot_encode = one_hot_encode
@@ -212,7 +213,7 @@ class AgentOracle:
             self.env_fn = lambda : SISRobustEnv(N,B,pop_size,seed)
 
         if data == 'continuous_state':
-            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed)
+            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed, data_type)
 
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
@@ -279,7 +280,7 @@ class AgentOracle:
             print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
         # Create actor-critic module
-        ac = actor_critic(env.observation_space, env.action_space,
+        ac = actor_critic(env.observation_space, env.action_space, opt_in_rate=self.opt_in_rate,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
             state_norm=self.state_norm,
@@ -405,7 +406,6 @@ class AgentOracle:
         def compute_loss_q(data):
             # seems unused
             print('compute_loss_q. seems this function is unused')
-            breakpoint()
 
             ohs, qs, oha, lambdas, transition_probs  = \
                 data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
@@ -761,6 +761,8 @@ if __name__ == '__main__':
     parser.add_argument('-B', type=float, default=1.0, help="Budget per round")
     parser.add_argument('--reward_bound', type=int, default=1, help="Rescale rewards to this value (only some environments)")
     parser.add_argument('--save_string', type=str, default="")
+    parser.add_argument('--opt_in_rate', type=float, default=1.0, help="Opt-in rate; p of sampled binomial for each arm")
+    parser.add_argument('--data_type', default='discrete', type=str, choices=['continuous','discrete'], help='Whether data is continuous or discrete')
 
     parser.add_argument('--agent_steps', type=int, default=10, help="Number of rollout steps between epochs")
     parser.add_argument('--agent_epochs', type=int, default=10, help="Number of training epochs")
@@ -823,6 +825,10 @@ if __name__ == '__main__':
     exp_name=args.exp_name
     gamma = args.gamma
 
+    opt_in_rate = args.opt_in_rate
+    opt_in_rate = max(0.0, min(1.0, opt_in_rate))
+    data_type = args.data_type
+
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -858,7 +864,7 @@ if __name__ == '__main__':
         env_fn = lambda : CounterExampleRobustEnv(N,B,seed)
 
     if args.data == 'continuous_state':
-        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed)
+        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed,data_type)
 
     if args.data == 'armman':
         from robust_rmab.baselines.nature_baselines_armman import   (
@@ -891,7 +897,7 @@ if __name__ == '__main__':
                              robust_keyword=args.robust_keyword,
                              # sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
                              pop_size=args.pop_size, one_hot_encode=one_hot_encode, state_norm=state_norm,
-                             non_ohe_obs_dim=non_ohe_obs_dim)
+                             non_ohe_obs_dim=non_ohe_obs_dim, opt_in_rate=opt_in_rate, data_type=data_type)
 
     nature_strategy = None
     # if args.robust_keyword == 'mid':

@@ -129,16 +129,17 @@ def list_valid_action_combinations(N,C,B,options):
 class MLPActorCriticRMAB(nn.Module):
 
 
-    def __init__(self, observation_space, action_space, opt_in=[],
+    def __init__(self, observation_space, action_space, opt_in_rate=1.0,
                  hidden_sizes=(64,64), input_feat_dim=4, C=None, N=None, B=None,
                  strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
                  state_norm=None,
-                 activation=nn.Tanh
+                 activation=nn.Tanh,
                  ):
         super().__init__()
 
         self.transition_prob_arr = np.zeros((N, input_feat_dim))
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
+        self.opt_in_rate = opt_in_rate
 
         # one-hot-encode the states for now
         self.obs_dim = observation_space.shape[0]
@@ -194,7 +195,7 @@ class MLPActorCriticRMAB(nn.Module):
         # opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
         # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
         # next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
-        next_iter_prob = [0.9] * self.N
+        next_iter_prob = [self.opt_in_rate] * self.N
 
         new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
         new_arms_indices = ((new_opt_in - self.opt_in) > 0.5).astype(float)
