@@ -5,7 +5,7 @@ import time
 from itertools import product
 
 from robust_rmab.environments.bandit_env import SISBanditEnv, RandomBanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
-from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT
+from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT, ContinuousStateExampleEnv
 
 import os
 import os.path as osp
@@ -67,14 +67,11 @@ def barPlot(labels, values, errors, ylabel='Mean Discounted Reward',
     plt.show()
 
 
-
-
-
-
 class RobustEnvWrapper():
-    def __init__(self, env, nature_params):
-
-        self.nature_params = nature_params
+    def __init__(self, env, params):
+        # params is either nature_params or opt_in.
+        # when we have changing # arms, params is opt_in
+        self.params = params
         self.env = env
 
         # loop over the attributes of the parent class and create those for the decorator
@@ -89,7 +86,7 @@ class RobustEnvWrapper():
         return self.env.reset_random()
 
     def step(self, actions):
-        return self.env.step(actions, self.nature_params)
+        return self.env.step(actions, self.params)
 
 class RobustEnvWrapperArmman():
     def __init__(self, env, nature_policy):
@@ -111,9 +108,6 @@ class RobustEnvWrapperArmman():
     def step(self, actions):
         a_nature = self.nature_policy.get_nature_action(self.env.current_full_state)
         return self.env.step(actions, a_nature)
-
-
-
 
 
 def takeAction(current_states, T, actions, random_stream):
@@ -580,6 +574,7 @@ if __name__=="__main__":
     parser.add_argument('-A', '--num_actions', default=2, type=int, help='Number of actions per process') # Only two actions implemented for now
     parser.add_argument('-g', '--discount_factor', default=0.9, type=float, help='Discount factor for MDP solvers')
     parser.add_argument('-rb', '--REWARD_BOUND', default=1.0, type=float, help='Maximum reward')
+    parser.add_argument('-opt', '--opt_in_rate', default=1.0, type=float, help='Maximum reward')
 
     parser.add_argument('-d', '--data', default='real', type=str,help='Method for generating transition probabilities',
                             choices=[   'SIS_old',
@@ -589,7 +584,8 @@ if __name__=="__main__":
                                         'toy_robust',
                                         'armman',
                                         'counterexample',
-                                        'sis'
+                                        'sis',
+                                        'continuous_state'
                                     ])
 
     parser.add_argument('-me', '--mdp_epsilon', default=1e-1, type=float, help='Tolerance for Value Iteration')
@@ -748,9 +744,9 @@ if __name__=="__main__":
     S = args.num_states
     A = args.num_actions
     B = int(N*args.budget_frac)
+    opt_in_rate = args.opt_in_rate
     if args.budget is not None:
         B = args.budget
-
     rl_info = {
         'model_file_path_combinatorial':args.rl_combinatorial_model_filepath,
         'model_file_path_rmab':args.rl_rmab_model_filepath,
@@ -858,6 +854,25 @@ if __name__=="__main__":
 
         env = RobustEnvWrapper(env, nature_actions)
 
+    if args.data == 'continuous_state':
+        env = ContinuousStateExampleEnv(N, B, seedbase, rl_info['data_type'])
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+
+        T = env.T
+        R = env.R
+        C = env.C
+
+        
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
+
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
+        # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'counterexample':
         from robust_rmab.baselines.nature_baselines_counterexample import   (
@@ -865,7 +880,6 @@ if __name__=="__main__":
                     OptimisticNaturePolicy, DetermNaturePolicy, SampledRandomNaturePolicy
                 )
         env_fn = lambda : CounterExampleRobustEnv(N,B,seedbase)
-
 
         env = env_fn()
         sampled_nature_parameter_ranges = env.sample_parameter_ranges()
@@ -886,9 +900,6 @@ if __name__=="__main__":
 
             T = env.get_T_for_a_nature(sampled_nature_params)
 
-
-        
-
         # N = 3
         # env = CounterExampleRobustEnv(B, seedbase)
         # T = env.T
@@ -897,8 +908,17 @@ if __name__=="__main__":
 
         nature_actions = nature_strategy.get_nature_action(None)
 
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
 
-        env = RobustEnvWrapper(env, nature_actions)
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions
+        # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'armman':
         from robust_rmab.baselines.nature_baselines_armman import   (
@@ -1097,8 +1117,11 @@ if __name__=="__main__":
     values_for_df=values_for_df.T
 
     df = pd.DataFrame(values_for_df, columns=labels)
-    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_h%s_data%s_r%s_p%s_s%s.csv'%(savestring, N,args.budget,L,args.data,args.robust_keyword,args.pop_size, seedbase)
-    df.to_csv(fname, index=False)
+    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s_tp-%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate, args.data_type)
+    if os.path.exists(fname):
+        df.to_csv(fname, mode='a', header=False, index=False)
+    else:
+        df.to_csv(fname, index=False)
 
     ##### do some basic plotting if running at the command line with more than one policy
     if args.policy<0:

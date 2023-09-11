@@ -17,8 +17,8 @@ from robust_rmab.utils.logx import EpochLogger
 from robust_rmab.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from robust_rmab.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
-from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv
-
+from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
+from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 
 class RMABPPO_Buffer:
@@ -174,7 +174,7 @@ class AgentOracle:
 
     def __init__(self, data, N, S, A, B, seed, REWARD_BOUND, agent_kwargs=dict(),
         home_dir="", exp_name="", sampled_nature_parameter_ranges=None, robust_keyword="",
-        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None):
+        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None, opt_in_rate=None, data_type=""):
 
         self.data = data
         self.home_dir = home_dir
@@ -187,6 +187,7 @@ class AgentOracle:
         self.seed=seed
         self.sampled_nature_parameter_ranges = sampled_nature_parameter_ranges
         self.robust_keyword = robust_keyword
+        self.opt_in_rate = opt_in_rate
 
         self.pop_size = pop_size
         self.one_hot_encode = one_hot_encode
@@ -211,6 +212,9 @@ class AgentOracle:
         if data == 'sis':
             self.env_fn = lambda : SISRobustEnv(N,B,pop_size,seed)
 
+        if data == 'continuous_state':
+            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed, data_type)
+
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
 
@@ -219,7 +223,7 @@ class AgentOracle:
         # this won't work if we go back to MPI, but doing it now to simplify seeding
         self.env = self.env_fn()
         self.env.seed(seed)
-        self.env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+        # self.env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
 
 
     # Todo - figure out parallelization with MPI -- not clear how to do this yet, so restrict to single cpu
@@ -276,7 +280,7 @@ class AgentOracle:
             print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
         # Create actor-critic module
-        ac = actor_critic(env.observation_space, env.action_space,
+        ac = actor_critic(env.observation_space, env.action_space, opt_in_rate=self.opt_in_rate,
             N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
             one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
             state_norm=self.state_norm,
@@ -302,6 +306,8 @@ class AgentOracle:
         vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
         qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
         lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+        scheduler_lm = ExponentialLR(lambda_optimizer, gamma=0.95) # 0.95 works. try 0.96
+        # scheduler_lm = StepLR(lambda_optimizer, step_size=20, gamma=0.05)
 
         # Set up model saving
         logger.setup_pytorch_saver(ac)
@@ -400,7 +406,6 @@ class AgentOracle:
         def compute_loss_q(data):
             # seems unused
             print('compute_loss_q. seems this function is unused')
-            breakpoint()
 
             ohs, qs, oha, lambdas, transition_probs  = \
                 data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
@@ -490,6 +495,7 @@ class AgentOracle:
 
                 # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
                 lambda_optimizer.step()
+                scheduler_lm.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
                 new_arms_indices = ac.update_opt_in()
@@ -537,7 +543,10 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                T_matrix = env.T
+                if hasattr(env, 'model_input_T'):
+                    T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                else:
+                    T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix # this update can accomodate different env
@@ -566,7 +575,10 @@ class AgentOracle:
 
                 # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
                 # update the transition probabilities input
-                # T_matrix = env.T
+                # if hasattr(env, 'model_input_T'):
+                #     T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                # else:
+                #     T_matrix = env.T
                 # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 # ac.transition_prob_arr = T_matrix # this update can accomodate different env
@@ -616,6 +628,8 @@ class AgentOracle:
                     if timeout or epoch_ended:
                         print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
                         print('opt-in', ac.opt_in)
+                        print('lambda lr', scheduler_lm.get_last_lr()[0])
+                        scheduler_lm.step()
                         # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
                         _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
@@ -687,7 +701,10 @@ class AgentOracle:
 
 
                 # update the transition probabilities input
-                T_matrix = env.T
+                if hasattr(env, 'model_input_T'):
+                    T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
+                else:
+                    T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 ac.transition_prob_arr = T_matrix
@@ -720,7 +737,6 @@ class AgentOracle:
 
 
         rewards = rewards.sum(axis=1).mean()
-        print("Rewards:", rewards)
 
 
         return rewards
@@ -745,6 +761,8 @@ if __name__ == '__main__':
     parser.add_argument('-B', type=float, default=1.0, help="Budget per round")
     parser.add_argument('--reward_bound', type=int, default=1, help="Rescale rewards to this value (only some environments)")
     parser.add_argument('--save_string', type=str, default="")
+    parser.add_argument('--opt_in_rate', type=float, default=1.0, help="Opt-in rate; p of sampled binomial for each arm")
+    parser.add_argument('--data_type', default='discrete', type=str, choices=['continuous','discrete'], help='Whether data is continuous or discrete')
 
     parser.add_argument('--agent_steps', type=int, default=10, help="Number of rollout steps between epochs")
     parser.add_argument('--agent_epochs', type=int, default=10, help="Number of training epochs")
@@ -755,24 +773,25 @@ if __name__ == '__main__':
     parser.add_argument('--agent_end_entropy_coeff', type=float, default=0.0, help="End entropy coefficient for the cooling procedure")
     parser.add_argument('--agent_pi_lr', type=float, default=2e-3, help="Learning rate for policy network")
     parser.add_argument('--agent_vf_lr', type=float, default=2e-3, help="Learning rate for critic network")
-    parser.add_argument('--agent_lm_lr', type=float, default=2e-3, help="Learning rate for lambda network")
+    parser.add_argument('--agent_lm_lr', type=float, default=2e-3, help="Learning rate for lambda network") #2e-3
     parser.add_argument('--agent_train_pi_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_train_vf_iters', type=int, default=20, help="Training iterations to run per epoch")
-    parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)")
+    parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)") # 4
     parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
     parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
     parser.add_argument('--pop_size', type=int, default=0)
 
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
-    parser.add_argument('-d', '--data', default='counterexample', type=str, help='Environment selection',
+    parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
                         choices=[   
                                     'random',
                                     'random_reset',
                                     'circulant', 
                                     'armman',
                                     'counterexample',
-                                    'sis'
+                                    'sis',
+                                    'continuous_state'
                                 ])
 
     parser.add_argument('--robust_keyword', default='pess', type=str, help='Method for picking some T out of the uncertain environment',
@@ -805,6 +824,10 @@ if __name__ == '__main__':
     home_dir = args.home_dir
     exp_name=args.exp_name
     gamma = args.gamma
+
+    opt_in_rate = args.opt_in_rate
+    opt_in_rate = max(0.0, min(1.0, opt_in_rate))
+    data_type = args.data_type
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -840,6 +863,9 @@ if __name__ == '__main__':
                 )
         env_fn = lambda : CounterExampleRobustEnv(N,B,seed)
 
+    if args.data == 'continuous_state':
+        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed,data_type)
+
     if args.data == 'armman':
         from robust_rmab.baselines.nature_baselines_armman import   (
                             RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
@@ -861,26 +887,27 @@ if __name__ == '__main__':
 
 
     env = env_fn()
-    sampled_nature_parameter_ranges = env.sample_parameter_ranges()
+    #  seems we don't need the line below for DDLPO
+    # sampled_nature_parameter_ranges = env.sample_parameter_ranges()
     # important to make sure these are always the same for all instatiations of the env
-    env.sampled_parameter_ranges = sampled_nature_parameter_ranges
+    # env.sampled_parameter_ranges = sampled_nature_parameter_ranges
 
     agent_oracle  = AgentOracle(data, N, S, A, budget, seed, reward_bound,
                              agent_kwargs=agent_kwargs, home_dir=home_dir, exp_name=exp_name,
                              robust_keyword=args.robust_keyword,
-                             sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
+                             # sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
                              pop_size=args.pop_size, one_hot_encode=one_hot_encode, state_norm=state_norm,
-                             non_ohe_obs_dim=non_ohe_obs_dim)
+                             non_ohe_obs_dim=non_ohe_obs_dim, opt_in_rate=opt_in_rate, data_type=data_type)
 
     nature_strategy = None
-    if args.robust_keyword == 'mid':
-        nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-    if args.robust_keyword == 'sample_random':
-        nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-        # init the random strategy
-        nature_strategy.sample_param_setting(seed)
+    # if args.robust_keyword == 'mid':
+    #     nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
+    #
+    # if args.robust_keyword == 'sample_random':
+    #     nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
+    #
+    #     # init the random strategy
+    #     nature_strategy.sample_param_setting(seed)
 
 
 
