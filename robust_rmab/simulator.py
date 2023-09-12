@@ -444,7 +444,20 @@ def load_pytorch_policy(fpath, itr, deterministic=False):
 
     return model
 
-
+def featurize_tp(transition_probs, transformation=None, out_dim=4):
+    N = transition_probs.shape[0]
+    output_features = np.zeros((N, out_dim))
+    np.random.seed(0)  # Set random seed for reproducibility
+    
+    if transformation == "linear":
+        transformation_matrix = np.random.rand(4, out_dim)
+        output_features = np.dot(transition_probs, transformation_matrix)
+    elif transformation == "nonlinear":
+        transformation_matrix = np.random.rand(4, out_dim)
+        output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
+    else:
+        output_features[:, :min(4, out_dim)] = transition_probs[:, :min(4, out_dim)]
+    return output_features
 
 def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=None, world_random_seed=None,
                         data_dict=None, file_root=None, env=None, rl_info=None, valid_action_combinations=None):
@@ -473,6 +486,15 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             rl_info['model'] = model
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
+            env.env.update_transition_probs(np.ones(env.env.N))
+            T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
+            T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
+            model.transition_param_arr = T_matrix
+            model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim)
+            model.opt_in = env.params
+            for arm_index in range(env.env.N):
+                    if model.opt_in[arm_index] < 0.5:
+                        model.feature_arr[arm_index] *= 0 # to make dummy arms more obvious to the lambda net
             rl_info['model'] =  model
 
     print('Running simulation w/ policy: %s'%policy_option)
@@ -1032,7 +1054,6 @@ if __name__=="__main__":
         np.random.rand()
         env.random_stream.rand()
         
-
     for i in range(N_TRIALS):
 
 

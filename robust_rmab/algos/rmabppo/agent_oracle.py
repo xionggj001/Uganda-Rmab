@@ -425,7 +425,6 @@ class AgentOracle:
                 loss_list[i] = ((ac.q_list(x) - qs[:, i])**2).mean()
             return loss_list
 
-        
         def compute_loss_lambda(data):
 
             disc_cost = data['costs'][0]
@@ -433,7 +432,7 @@ class AgentOracle:
             obs = data['obs'][0]
             if not self.one_hot_encode:
                 obs = obs/self.state_norm
-            lambda_net_input = np.concatenate((obs, ac.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, ac.feature_arr.flatten()))
             lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
             # lamb = ac.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             # print('lamb',lamb, 'term 1', env.B/(1-gamma), 'cost',disc_cost, 'diff', env.B/(1-gamma) - disc_cost)
@@ -445,7 +444,6 @@ class AgentOracle:
             # print(loss)
 
             return loss
-
 
         def update(epoch, head_entropy_coeff):
             data = buf.get()
@@ -508,7 +506,6 @@ class AgentOracle:
         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
         o = o.reshape(-1)
 
-
         INIT_LAMBDA_TRAINS = init_lambda_trains
 
         # Initialize lambda to make large predictions
@@ -527,15 +524,6 @@ class AgentOracle:
         new_arms_indices = ac.update_opt_in()
         env.update_transition_probs(new_arms_indices)
 
-        # # Sample a nature policy
-        # nature_eq = np.array(nature_eq)
-        # nature_eq[nature_eq < 0] = 0
-        # nature_eq = nature_eq / nature_eq.sum()
-        # # print('nature_eq')
-        # # print(nature_eq)
-        # nature_pol = np.random.choice(nature_strats,p=nature_eq)
-
-
         # Main loop: collect experience in env and update/log each epoch
         head_entropy_coeff_schedule = np.linspace(start_entropy_coeff, end_entropy_coeff, epochs)
         for epoch in range(epochs):
@@ -549,13 +537,13 @@ class AgentOracle:
                     T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                ac.transition_prob_arr = T_matrix # this update can accomodate different env
+                ac.feature_arr = T_matrix # this update can accomodate different env
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
-                        ac.transition_prob_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
+                        ac.feature_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
                 # featurization
-                ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
-                lambda_net_input = np.concatenate((o, ac.transition_prob_arr.flatten()))
+                ac.feature_arr = featurize_tp(ac.feature_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+                lambda_net_input = np.concatenate((o, ac.feature_arr.flatten()))
                 current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
                 # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
                 logger.store(Lamb=current_lamb)
@@ -581,8 +569,8 @@ class AgentOracle:
                 #     T_matrix = env.T
                 # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                # ac.transition_prob_arr = T_matrix # this update can accomodate different env
-                # ac.transition_prob_arr = featurize_tp(ac.transition_prob_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+                # ac.feature_arr = T_matrix # this update can accomodate different env
+                # ac.feature_arr = featurize_tp(ac.feature_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
 
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 
@@ -609,7 +597,7 @@ class AgentOracle:
 
 
                 # save and log
-                buf.store(o, ac.transition_prob_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
@@ -653,7 +641,7 @@ class AgentOracle:
             # Save model
             if (epoch == epochs-1):
                 print("saving")
-                logger.save_state({'env': env}, None)
+                # logger.save_state({'env': env}, None)
 
             # Perform RMABPPO update!
             head_entropy_coeff = head_entropy_coeff_schedule[epoch]
@@ -674,6 +662,15 @@ class AgentOracle:
             logger.dump_tabular()
 
 
+        env.update_transition_probs(np.ones(env.N))
+        T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
+        T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
+        ac.transition_param_arr = T_matrix
+        ac.tp_transform = tp_transform
+        ac.out_dim = ac_kwargs["input_feat_dim"]
+        ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+        print("saving")
+        logger.save_state({'env': env}, None)
         return ac
 
 
@@ -707,7 +704,7 @@ class AgentOracle:
                     T_matrix = env.T
                 T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                ac.transition_prob_arr = T_matrix
+                ac.feature_arr = T_matrix
 
 
                 a_agent  = agent_pol.act_test(torch_o)

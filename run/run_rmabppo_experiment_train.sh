@@ -23,4 +23,4 @@ python3 ${1}/agent_oracle.py --hid 64 -l 2 --gamma 0.9 --cpu 1 \
     --agent_lamb_update_freq 4 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
-    --agent_tp_transform_dims 3 \
+    --agent_tp_transform_dims 4 \

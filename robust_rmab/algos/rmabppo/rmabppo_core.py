@@ -137,7 +137,7 @@ class MLPActorCriticRMAB(nn.Module):
                  ):
         super().__init__()
 
-        self.transition_prob_arr = np.zeros((N, input_feat_dim))
+        self.feature_arr = np.zeros((N, input_feat_dim))
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
         self.opt_in_rate = opt_in_rate
 
@@ -186,20 +186,24 @@ class MLPActorCriticRMAB(nn.Module):
     #     # input is 1d array of length N
     #     # output is 2d array of shape (N, 4)
     #     # output[i] should be (0.5, 0.5, 0, p) --see synthetic experiments description in the paper
-    #     self.transition_prob_arr = np.zeros((self.N, 4))
+    #     self.feature_arr = np.zeros((self.N, 4))
     #     for i in range(self.N):
-    #         self.transition_prob_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
+    #         self.feature_arr[i] = (0.5, 0.5, 0.0, transition_probs_input[i])
 
     def update_opt_in(self):
         # randomly choose arms to opt-out. randomly choose some opt-out states to opt-in again
         # opt_in_prob = [0.9, 0.8] # probability that an arm will opt-in given it is currently opt-in / opt-out
         # with opt_in_prob = [0.9, 0.8], in expectation, 88.89% of all arms are opt-in, among which 10% are new beneficieries
         # next_iter_prob = self.opt_in * opt_in_prob[0] + (1 - self.opt_in) * opt_in_prob[1]
-        next_iter_prob = [self.opt_in_rate] * self.N
+        np.random.seed(None)
+        st0 = np.random.get_state()
 
+        next_iter_prob = [self.opt_in_rate] * self.N
         new_opt_in = np.random.binomial([1] * self.N, next_iter_prob)
         new_arms_indices = ((new_opt_in - self.opt_in) > 0.5).astype(float)
         self.opt_in = new_opt_in
+
+        np.random.set_state(st0)
         return new_arms_indices
 
     def __repr__(self):
@@ -217,7 +221,7 @@ class MLPActorCriticRMAB(nn.Module):
 
         disc_cost = 2 * self.B/(1-gamma)
         # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-        lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+        lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
         lamb = self.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
 
         loss = lamb*(self.B/(1-gamma) - disc_cost)
@@ -237,7 +241,7 @@ class MLPActorCriticRMAB(nn.Module):
             a1_probs = np.zeros(self.N)
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 # need to define transition prob for each arm. maybe hardcode for each arm for now
                 full_obs = None
                 if self.one_hot_encode:
@@ -274,7 +278,7 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -307,7 +311,7 @@ class MLPActorCriticRMAB(nn.Module):
         if not self.one_hot_encode:
             obs = obs/self.state_norm
         # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-        lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+        lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
         lamb = self.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
         return lamb.detach().numpy()
 
@@ -322,11 +326,11 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
             lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -375,12 +379,12 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
             lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -490,11 +494,11 @@ class MLPActorCriticRMAB(nn.Module):
                 obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
             lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -525,11 +529,11 @@ class MLPActorCriticRMAB(nn.Module):
                     obs = obs/self.state_norm 
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
             lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -586,11 +590,11 @@ class MLPActorCriticRMAB(nn.Module):
                     obs = obs/self.state_norm 
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.transition_prob_arr.flatten()))
+            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
             lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
 
             for i in range(self.N):
-                transition_prob = self.transition_prob_arr[i]
+                transition_prob = self.feature_arr[i]
                 full_obs = None
                 if self.one_hot_encode:
                     ohs = np.zeros(self.obs_dim)
@@ -649,4 +653,17 @@ class MLPActorCriticRMAB(nn.Module):
         # print(action)
         return action
 
-
+    def featurize_tp(self, transition_probs, transformation=None, out_dim=4):
+        N = transition_probs.shape[0]
+        output_features = np.zeros((N, out_dim))
+        np.random.seed(0)  # Set random seed for reproducibility
+        
+        if transformation == "linear":
+            transformation_matrix = np.random.rand(4, out_dim)
+            output_features = np.dot(transition_probs, transformation_matrix)
+        elif transformation == "nonlinear":
+            transformation_matrix = np.random.rand(4, out_dim)
+            output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
+        else:
+            output_features[:, :min(4, out_dim)] = transition_probs[:, :min(4, out_dim)]
+        return output_features
