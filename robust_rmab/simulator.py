@@ -86,7 +86,7 @@ class RobustEnvWrapper():
         return self.env.reset_random()
 
     def step(self, actions):
-        return self.env.step(actions, self.params)
+        return self.env.step(actions, self.params, mode="eval")
 
 class RobustEnvWrapperArmman():
     def __init__(self, env, nature_policy):

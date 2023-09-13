@@ -839,7 +839,7 @@ class CounterExampleRobustEnv(gym.Env):
 
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
-    def step(self, a_agent, opt_in, a_nature=[]):
+    def step(self, a_agent, opt_in, mode="train"):
 
         # for arm_i in range(a_nature.shape[0]):
         #     param = a_nature[arm_i]
@@ -871,8 +871,9 @@ class CounterExampleRobustEnv(gym.Env):
             if opt_in[i] < 0.5:
                 next_full_state[i] = 0  # opt-out arms have dummy state
             rewards[i] = self.R[i, next_arm_state]
-            
-        rewards[opt_in == 0] = 0
+
+        if mode == "eval":
+            rewards[opt_in == 0] = 0 # enforce no reward from opt-out only during test time 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
         return next_full_state, rewards, False, None
@@ -1023,7 +1024,7 @@ class ContinuousStateExampleEnv(gym.Env):
         actions[choices] = 1
         return actions
 
-    def step(self, a_agent, opt_in, a_nature=[]):
+    def step(self, a_agent, opt_in, mode="train"):
         ###### Get next state
         next_full_state = np.zeros(self.N, dtype=int)
         rewards = np.zeros(self.N)
@@ -1041,7 +1042,8 @@ class ContinuousStateExampleEnv(gym.Env):
                 next_full_state[i] = 0  # opt-out arms have dummy state
             rewards[i] = self.reward_fun(next_arm_state)
 
-        rewards[opt_in == 0] = 0
+        if mode == "eval":
+            rewards[opt_in == 0] = 0 # enforce no reward from opt-out only during test time 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
         # print('rewards', rewards)
