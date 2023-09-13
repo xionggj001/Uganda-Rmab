@@ -1008,8 +1008,8 @@ class ContinuousStateExampleEnv(gym.Env):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
         # if action==0, then next state = current state + Normal(1st entry, 2nd entry)
         # if action==1, then next state = current state + Normal(3rd entry, 4th entry)
-        sample_ub = [-0.3, 0.2, 1.0, 0.2]
-        sample_lb = [-0.5, 0.0, 0.2, 0.0]
+        sample_ub = [-0.1, 0.2, 0.5, 0.2]
+        sample_lb = [-0.5, 0.2, 0.1, 0.2]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -1026,15 +1026,14 @@ class ContinuousStateExampleEnv(gym.Env):
 
     def step(self, a_agent, opt_in, mode="train"):
         ###### Get next state
-        next_full_state = np.zeros(self.N, dtype=int)
+        next_full_state = np.zeros(self.N, dtype=float)
         rewards = np.zeros(self.N)
         for i in range(self.N):
             # current_arm_state=int(self.current_full_state[i])
             current_arm_state = self.current_full_state[i]  # want continuous states. not rounded
             action = int(a_agent[i])
             # when action is i, state moves according to N(T[i,0,0], T[i,1,0])
-            next_arm_state = current_arm_state + self.random_stream.normal(
-                loc=self.T[i, action, 0, 1], scale=self.T[i, action, 1, 1])
+            next_arm_state = current_arm_state + self.random_stream.normal(loc=self.T[i, action, 0, 1], scale=self.T[i, action, 1, 1])
             # bound the states
             next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state[i] = next_arm_state

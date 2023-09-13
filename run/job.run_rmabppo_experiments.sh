@@ -1,19 +1,19 @@
 #!/bin/bash
 
+# make dir to store experiment outputs
+mkdir -p expts
+counter=0
+while [[ -e expts/output_${counter}.txt ]]; do
+    ((counter++))
+done
+echo -e "\e[1;92m==== Starting Experiments, Logging @ expts/output_${counter}.txt ====\e[0m"
+exec &> expts/output_${counter}.txt
+
 # run the entire script 10 times
 for main_run in {1..10}; do
 
   echo -e "\e[1;92m==== Starting Main Run $main_run ====\e[0m"
   rm -rf ./data/*
-
-  # make dir to store experiment outputs
-  mkdir -p expts
-  counter=0
-  while [[ -e expts/output_${counter}.txt ]]; do
-      ((counter++))
-  done
-  echo -e "\e[1;92m==== Starting Experiments, Logging @ expts/output_${counter}.txt ====\e[0m"
-  exec &> expts/output_${counter}.txt
 
   # Experiment parameters to search
   N_values=(21 48 96)
