@@ -1105,10 +1105,11 @@ class SISRobustEnv(gym.Env):
         self.PARAMETER_RANGES = self.get_parameter_ranges(self.N)
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
-        self.sampled_parameter_ranges = None 
+        # self.sampled_parameter_ranges = None
+        self.sampled_parameter_ranges = self.sample_parameter_ranges() # shape (n_arms, 4, 2)
 
         # this model only needs its params set once at the beginning
-        self.param_setting = None
+        self.param_setting = np.zeros(self.sampled_parameter_ranges.shape[:-1])
 
 
         self.seed(seed=seed)
@@ -1116,6 +1117,15 @@ class SISRobustEnv(gym.Env):
 
         self.tanh = torch.nn.Tanh()
         self.sigmoid = torch.nn.Sigmoid()
+
+    def update_transition_probs(self, arms_to_update):
+        # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
+        sample_ub = self.sampled_parameter_ranges[0,:,1] # all arms are sampled from the same distribution. so they use the same range
+        sample_lb = self.sampled_parameter_ranges[0,:,0]
+        for i in range(self.N):
+            if arms_to_update[i] > 0.5:
+                new_params = np.random.uniform(low=sample_lb, high=sample_ub)
+                self.param_setting[i, :] = new_params
 
 
     def p_i_s(self, q_t, i, s, pop_size):
@@ -1331,9 +1341,8 @@ class SISRobustEnv(gym.Env):
 
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
-    def step(self, a_agent, a_nature):
-
-        self.set_params(a_nature)
+    def step(self, a_agent, opt_in, mode="train"): # a_nature
+        # self.set_params(a_nature)
 
         ###### Get next state
         next_full_state = np.zeros(self.N, dtype=int)
@@ -1345,7 +1354,12 @@ class SISRobustEnv(gym.Env):
 
             next_arm_state=np.argmax(self.random_stream.multinomial(1, distro))
             next_full_state[i]=next_arm_state
+            if opt_in[i] < 0.5:
+                next_full_state[i] = 0  # opt-out arms have dummy state
             rewards[i] = self.R[i, next_arm_state]
+
+        if mode == "eval":
+            rewards[opt_in == 0] = 0  # enforce no reward from opt-out only during test time
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
