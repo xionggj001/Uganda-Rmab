@@ -487,8 +487,11 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
             env.env.update_transition_probs(np.ones(env.env.N))
-            T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
-            T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
+            if data_dict['data_type'] == 'sis':
+                T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
+            else:
+                T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
+                T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
             model.transition_param_arr = T_matrix
             model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim)
             model.opt_in = env.params
@@ -801,6 +804,7 @@ if __name__=="__main__":
 
     data_dict['hawkins_lambdas_rl_states'] = []
     data_dict['rl_lambdas'] = []
+    data_dict['data_type'] = args.data
 
 
 
@@ -1031,8 +1035,15 @@ if __name__=="__main__":
 
         nature_actions = nature_strategy.get_nature_action(None)
 
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
 
-        env = RobustEnvWrapper(env, nature_actions)
+        env = RobustEnvWrapper(env, opt_in_status)
 
 
     valid_action_combinations = None
