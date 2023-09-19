@@ -362,7 +362,8 @@ class ARMMANRobustEnv(gym.Env):
         self.PARAMETER_RANGES = self.get_parameter_ranges(self.N)
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
-        self.sampled_parameter_ranges = None 
+        # self.sampled_parameter_ranges = None
+        self.param_setting = np.zeros(self.PARAMETER_RANGES.shape[:-1])
 
 
         self.seed(seed=seed)
@@ -370,6 +371,18 @@ class ARMMANRobustEnv(gym.Env):
 
         self.tanh = torch.nn.Tanh()
         self.sigmoid = torch.nn.Sigmoid()
+
+
+    def update_transition_probs(self, arms_to_update):
+        # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
+        # parameters are [arm_i, arm_state, arm_a]
+        for i in range(self.N):
+            if arms_to_update[i] > 0.5:
+                for j in range(self.PARAMETER_RANGES.shape[1])
+                    sample_ub = self.PARAMETER_RANGES[i, j, :, 1]
+                    sample_lb = self.PARAMETER_RANGES[i, j, :, 0]
+                    new_params = np.random.uniform(low=sample_lb, high=sample_ub)
+                    self.param_setting[i, j, :] = new_params
 
 
 
@@ -552,27 +565,25 @@ class ARMMANRobustEnv(gym.Env):
         actions[choices] = 1
         return actions
 
-
     # a_agent should correspond to an action respresented in the transition matrix
     # a_nature should be a probability in the range specified by self.parameter_ranges
-    def step(self, a_agent, a_nature):
-        # print('a_nature',a_nature)
-        for arm_i in range(a_nature.shape[0]):
-            for arm_a in range(a_nature.shape[1]):
-                param = a_nature[arm_i, arm_a]
+    def step(self, a_agent, opt_in, mode="train"):
+        for arm_i in range(self.N):
+            for arm_a in range(self.param_setting.shape[-1]):
+                param = self.param_setting[arm_i, arm_a] # this requires a second look. check a_nature dim
                 arm_state = int(self.current_full_state[arm_i])
-                
 
-                if param < self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]:
-                    print("Warning! nature action below allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i, arm_state, arm_a]))
-                    print("Setting to lower bound of range...")
-                    print('arm state',arm_state)
-                    param = self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]
-                elif param > self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 1]:
-                    print("Warning! nature action above allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i, arm_state, arm_a]))
-                    print("Setting to upper bound of range...")
-                    print('arm state',arm_state)
-                    param = self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 1]
+
+                # if param < self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]:
+                #     print("Warning! nature action below allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i, arm_state, arm_a]))
+                #     print("Setting to lower bound of range...")
+                #     print('arm state',arm_state)
+                #     param = self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]
+                # elif param > self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 1]:
+                #     print("Warning! nature action above allowed param range. Was %s but should be in %s"%(param, self.sampled_parameter_ranges[arm_i, arm_state, arm_a]))
+                #     print("Setting to upper bound of range...")
+                #     print('arm state',arm_state)
+                #     param = self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 1]
                 
                 # semi-annoying specific code to make sure we set the right entries for each state
                 if arm_state == 0:
@@ -609,7 +620,12 @@ class ARMMANRobustEnv(gym.Env):
             # print('i',i, 'current_arm_state',current_arm_state, 'a_agent', a_agent)
             next_arm_state=np.argmax(self.random_stream.multinomial(1, self.T[i, current_arm_state, int(a_agent[i]), :]))
             next_full_state[i]=next_arm_state
+            if opt_in[i] < 0.5:
+                next_full_state[i] = 0  # opt-out arms have dummy state
             rewards[i] = self.R[i, next_arm_state]
+
+        if mode == "eval":
+            rewards[opt_in == 0] = 0  # enforce no reward from opt-out only during test time
 
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)

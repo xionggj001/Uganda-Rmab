@@ -531,7 +531,7 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'sis':
+                if self.data == 'sis' or self.data == 'armman':
                     T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
                 else:
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
@@ -663,7 +663,7 @@ class AgentOracle:
 
 
         env.update_transition_probs(np.ones(env.N))
-        if self.data == 'sis':
+        if self.data == 'sis' or self.data == 'armman':
             T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
         else:
             T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T

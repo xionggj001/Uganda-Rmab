@@ -487,7 +487,7 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
             env.env.update_transition_probs(np.ones(env.env.N))
-            if data_dict['data_type'] == 'sis':
+            if data_dict['dataset_name'] == 'sis' or data_dict['dataset_name'] == 'armman':
                 T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
@@ -804,7 +804,7 @@ if __name__=="__main__":
 
     data_dict['hawkins_lambdas_rl_states'] = []
     data_dict['rl_lambdas'] = []
-    data_dict['data_type'] = args.data
+    data_dict['dataset_name'] = args.data
 
 
 
