@@ -21,7 +21,7 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
 --agent_train_vf_iters 20 \
 --agent_lamb_update_freq 4 \
 --robust_keyword ${8} \
-
+--opt_in_rate ${11} \
 
 exp_name=${5}_n${6}b${7}d${4}r${8}p0
 python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
@@ -35,4 +35,5 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
  --robust_keyword ${8} \
  --file_root ${1} \
  --save_string ${5} \
- --no_hawkins ${10}
+ --no_hawkins ${10} \
+ --opt_in_rate ${11}

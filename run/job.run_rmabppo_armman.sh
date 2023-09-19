@@ -7,8 +7,9 @@ n_train_epochs=100
 seed=0
 cdir="."
 no_hawkins=1
+opt_in_rate=0.9
 
-bash run/run_rmabppo_armman.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} 
+bash run/run_rmabppo_armman.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${opt_in_rate}
 
 
 

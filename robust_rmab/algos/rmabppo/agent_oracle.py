@@ -544,8 +544,7 @@ class AgentOracle:
                 ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
-                        ac.feature_arr[arm_index] = T_matrix[
-                                                        arm_index] * 0  # to make dummy arms more obvious to the lambda net
+                        ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
                 lambda_net_input = np.concatenate((o, ac.feature_arr.flatten()))
                 current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
                 # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
