@@ -531,8 +531,11 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'sis' or self.data == 'armman':
+                if self.data == 'sis':
                     T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
+                elif self.data == 'armman':
+                    T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
+                    T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 else:
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
                     T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
@@ -663,8 +666,11 @@ class AgentOracle:
 
 
         env.update_transition_probs(np.ones(env.N))
-        if self.data == 'sis' or self.data == 'armman':
+        if self.data == 'sis':
             T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
+        elif self.data == 'armman':
+            T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
+            T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
         else:
             T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
             T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
@@ -700,22 +706,8 @@ class AgentOracle:
                 # a_nature = nature_pol.get_nature_action(torch_o)
                 # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
 
-
-                # # update the transition probabilities input
-                # if hasattr(env, 'model_input_T'):
-                #     T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
-                # else:
-                #     T_matrix = env.T
-                # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
-                # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                # if self.data == 'sis':
-                #     T_matrix = env.param_setting # for SIS env, 4 parameters encode the transition dynamics information
-                # ac.feature_arr = T_matrix # this update can accomodate different env
-                # for arm_index in range(N):
-                #     if ac.opt_in[arm_index] < 0.5:
-                #         ac.feature_arr[arm_index] = T_matrix[arm_index] * 0 # to make dummy arms more obvious to the lambda net
-                # # featurization
-                # ac.feature_arr = featurize_tp(ac.feature_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+                # currently this function is never used.
+                # # should update features here (if we use this function at some point)
 
 
                 a_agent  = agent_pol.act_test(torch_o)

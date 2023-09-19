@@ -359,7 +359,8 @@ class ARMMANRobustEnv(gym.Env):
         self.current_full_state = np.zeros(N)
         self.random_stream = np.random.RandomState()
 
-        self.PARAMETER_RANGES = self.get_parameter_ranges(self.N)
+        self.PARAMETER_RANGES = self.get_parameter_ranges(self.N) # this range is pretty big, e.g. [0.3, 0.8]
+        self.PARAMETER_RANGES = self.sample_parameter_ranges() # this range is much smaller, e.g. [0.5, 0.7]
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
         # self.sampled_parameter_ranges = None
@@ -376,9 +377,11 @@ class ARMMANRobustEnv(gym.Env):
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
         # parameters are [arm_i, arm_state, arm_a]
+        # for each arm, we first sample parameters ranges, then sample from the parameter range.
+        # thus, arms are sampled from the same distribution, as long as they are in rangeA, rangeB, and rangeC with given probabilities
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
-                for j in range(self.PARAMETER_RANGES.shape[1])
+                for j in range(self.PARAMETER_RANGES.shape[1]):
                     sample_ub = self.PARAMETER_RANGES[i, j, :, 1]
                     sample_lb = self.PARAMETER_RANGES[i, j, :, 0]
                     new_params = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -570,8 +573,8 @@ class ARMMANRobustEnv(gym.Env):
     def step(self, a_agent, opt_in, mode="train"):
         for arm_i in range(self.N):
             for arm_a in range(self.param_setting.shape[-1]):
-                param = self.param_setting[arm_i, arm_a] # this requires a second look. check a_nature dim
                 arm_state = int(self.current_full_state[arm_i])
+                param = self.param_setting[arm_i, arm_state, arm_a] # this requires a second look. check a_nature dim
 
 
                 # if param < self.sampled_parameter_ranges[arm_i, arm_state, arm_a, 0]:
