@@ -24,6 +24,7 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
 --opt_in_rate ${11} \
 --agent_tp_transform 'linear' \
 --agent_tp_transform_dims 6 \
+--scheduler_discount 0.95 \
 
 exp_name=${5}_n${6}b${7}d${4}r${8}p0
 python3 ${1}/robust_rmab/simulator.py --discount 0.9 \

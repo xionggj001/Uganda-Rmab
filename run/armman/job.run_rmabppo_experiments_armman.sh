@@ -10,7 +10,7 @@ echo -e "\e[1;92m==== Starting Experiments, Logging @ expts/output_${counter}.tx
 exec &> expts/output_${counter}.txt
 
 # run the entire script 10 times
-for main_run in {1..10}; do
+for main_run in {1..1}; do
 
   echo -e "\e[1;92m==== Starting Main Run $main_run ====\e[0m"
   rm -rf ./data/*
@@ -22,7 +22,7 @@ for main_run in {1..10}; do
 
   # Fixed parameters
   data="armman"
-  save_string="ce_rmabppo_test"
+  save_string="armman_rmabppo_test"
   robust_keyword="sample_random"
   n_train_epochs=100
   seed=0
@@ -30,17 +30,21 @@ for main_run in {1..10}; do
   no_hawkins=1
   tp_transform="linear"
   data_type="discrete" #only for approximation tests, can ignore
-
+  agent_tp_transform_dims=6 # setting the right dim is crucial. dim=4 produces worse results
+  scheduler_discount=0.95 # without the scheduler, performance is worst on B=3 and B=5
+  training_opt_in_rate=0.8
+ 
   for i in "${!N_values[@]}"; do
     N=${N_values[$i]}
     B=${B_values[$i]}
     echo -e "\e[1;31m==== STARTING EXPERIMENT: N=$N, B=$B ====\e[0m"
-    bash run/run_rmabppo_experiment_train.sh $cdir $seed 0 $data $save_string $N $B \
-                                            $robust_keyword $n_train_epochs $no_hawkins $tp_transform 0.9 $data_type
+    bash run/armman/run_rmabppo_experiment_train_armman.sh $cdir $seed 0 $data $save_string $N $B \
+                                            $robust_keyword $n_train_epochs $no_hawkins $tp_transform $training_opt_in_rate \
+                                            $data_type $agent_tp_transform_dims $scheduler_discount
     for opt_in_rate in "${opt_in_rates[@]}"; do
       for run in {1..5}; do
         echo -e "\e[1;34m==== RUN $run FOR opt_in_rate=$opt_in_rate ====\e[0m"
-        bash run/run_rmabppo_experiment_test.sh $cdir $seed 0 $data $save_string $N $B \
+        bash run/armman/run_rmabppo_experiment_test.sh $cdir $seed 0 $data $save_string $N $B \
                                                 $robust_keyword $n_train_epochs $no_hawkins $tp_transform $opt_in_rate $data_type
       done
     done
