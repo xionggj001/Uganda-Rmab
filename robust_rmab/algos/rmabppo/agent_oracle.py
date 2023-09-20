@@ -174,7 +174,8 @@ class AgentOracle:
 
     def __init__(self, data, N, S, A, B, seed, REWARD_BOUND, agent_kwargs=dict(),
         home_dir="", exp_name="", sampled_nature_parameter_ranges=None, robust_keyword="",
-        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None, opt_in_rate=None, data_type=""):
+        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None, opt_in_rate=None, data_type="",
+                 scheduler_discount=0.99999):
 
         self.data = data
         self.home_dir = home_dir
@@ -188,6 +189,7 @@ class AgentOracle:
         self.sampled_nature_parameter_ranges = sampled_nature_parameter_ranges
         self.robust_keyword = robust_keyword
         self.opt_in_rate = opt_in_rate
+        self.scheduler_discount = scheduler_discount
 
         self.pop_size = pop_size
         self.one_hot_encode = one_hot_encode
@@ -306,31 +308,32 @@ class AgentOracle:
         vf_optimizer = Adam(ac.v_list.parameters(), lr=vf_lr)
         qf_optimizer = Adam(ac.q_list.parameters(), lr=qf_lr)
         lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
-        scheduler_lm = ExponentialLR(lambda_optimizer, gamma=0.95) # 0.95 works. try 0.96
+        scheduler_lm = ExponentialLR(lambda_optimizer, gamma=self.scheduler_discount) # 0.95 works. try 0.96
         # scheduler_lm = StepLR(lambda_optimizer, step_size=20, gamma=0.05)
 
         # Set up model saving
         logger.setup_pytorch_saver(ac)
 
-        def featurize_tp(transition_probs, transformation=None, out_dim=4):
+        # input dimension for featurize_tp
+        feature_input_dim = 4
+        if self.data == 'sis':
+            feature_input_dim = 6
+        elif self.data == 'armman':
+            feature_input_dim = 6
+
+        def featurize_tp(transition_probs, transformation=None, out_dim=4, in_dim=4):
             N = transition_probs.shape[0]
             output_features = np.zeros((N, out_dim))
             np.random.seed(0)  # Set random seed for reproducibility
 
-            feature_input_dim = 4
-            if self.data == 'sis':
-                feature_input_dim = 6
-            elif self.data == 'armman':
-                feature_input_dim = 6
-                
             if transformation == "linear":
-                transformation_matrix = np.random.rand(feature_input_dim, out_dim)
+                transformation_matrix = np.random.rand(in_dim, out_dim)
                 output_features = np.dot(transition_probs, transformation_matrix)
             elif transformation == "nonlinear":
-                transformation_matrix = np.random.rand(feature_input_dim, out_dim)
+                transformation_matrix = np.random.rand(in_dim, out_dim)
                 output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
             else:
-                output_features[:, :min(feature_input_dim, out_dim)] = transition_probs[:, :min(feature_input_dim, out_dim)]
+                output_features[:, :min(in_dim, out_dim)] = transition_probs[:, :min(in_dim, out_dim)]
             return output_features
 
         # Set up function for computing RMABPPO policy loss
@@ -547,7 +550,7 @@ class AgentOracle:
                     T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                     T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 # featurization
-                ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+                ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim=feature_input_dim)
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
                         ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
@@ -570,15 +573,6 @@ class AgentOracle:
                 # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
 
                 # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
-                # update the transition probabilities input
-                # if hasattr(env, 'model_input_T'):
-                #     T_matrix = env.model_input_T # continuous state can approximate discrete state ground truth, with appropriate T
-                # else:
-                #     T_matrix = env.T
-                # T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
-                # T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                # ac.feature_arr = T_matrix # this update can accomodate different env
-                # ac.feature_arr = featurize_tp(ac.feature_arr, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
 
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
 
@@ -683,7 +677,8 @@ class AgentOracle:
         ac.transition_param_arr = T_matrix
         ac.tp_transform = tp_transform
         ac.out_dim = ac_kwargs["input_feat_dim"]
-        ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"])
+        ac.feature_input_dim = feature_input_dim
+        ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim = feature_input_dim)
         print("saving")
         logger.save_state({'env': env}, None)
         return ac
@@ -785,6 +780,7 @@ if __name__ == '__main__':
     parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
     parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
     parser.add_argument('--pop_size', type=int, default=0)
+    parser.add_argument('--scheduler_discount', type=float, default=0.99999) # 0.99999 is effectively removing scheduler
 
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
@@ -833,6 +829,7 @@ if __name__ == '__main__':
     opt_in_rate = args.opt_in_rate
     opt_in_rate = max(0.0, min(1.0, opt_in_rate))
     data_type = args.data_type
+    scheduler_discount = args.scheduler_discount
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -902,7 +899,8 @@ if __name__ == '__main__':
                              robust_keyword=args.robust_keyword,
                              # sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
                              pop_size=args.pop_size, one_hot_encode=one_hot_encode, state_norm=state_norm,
-                             non_ohe_obs_dim=non_ohe_obs_dim, opt_in_rate=opt_in_rate, data_type=data_type)
+                             non_ohe_obs_dim=non_ohe_obs_dim, opt_in_rate=opt_in_rate, data_type=data_type,
+                                scheduler_discount=scheduler_discount)
 
     nature_strategy = None
     # if args.robust_keyword == 'mid':

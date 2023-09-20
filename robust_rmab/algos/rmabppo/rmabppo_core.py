@@ -653,23 +653,17 @@ class MLPActorCriticRMAB(nn.Module):
         # print(action)
         return action
 
-    def featurize_tp(self, transition_probs, transformation=None, out_dim=4):
+    def featurize_tp(self, transition_probs, transformation=None, out_dim=4, in_dim=4):
         N = transition_probs.shape[0]
         output_features = np.zeros((N, out_dim))
         np.random.seed(0)  # Set random seed for reproducibility
 
-        feature_input_dim = 4
-        if self.data == 'sis':
-            feature_input_dim = 6
-        elif self.data == 'armman':
-            feature_input_dim = 6
-
         if transformation == "linear":
-            transformation_matrix = np.random.rand(feature_input_dim, out_dim)
+            transformation_matrix = np.random.rand(in_dim, out_dim)
             output_features = np.dot(transition_probs, transformation_matrix)
         elif transformation == "nonlinear":
-            transformation_matrix = np.random.rand(feature_input_dim, out_dim)
+            transformation_matrix = np.random.rand(in_dim, out_dim)
             output_features = 1 / (1 + np.exp(-np.dot(transition_probs, transformation_matrix)))
         else:
-            output_features[:, :min(feature_input_dim, out_dim)] = transition_probs[:, :min(feature_input_dim, out_dim)]
+            output_features[:, :min(in_dim, out_dim)] = transition_probs[:, :min(in_dim, out_dim)]
         return output_features

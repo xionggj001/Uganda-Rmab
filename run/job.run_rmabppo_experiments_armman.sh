@@ -10,7 +10,7 @@ echo -e "\e[1;92m==== Starting Experiments, Logging @ expts/output_${counter}.tx
 exec &> expts/output_${counter}.txt
 
 # run the entire script 10 times
-for main_run in {1..2}; do
+for main_run in {1..10}; do
 
   echo -e "\e[1;92m==== Starting Main Run $main_run ====\e[0m"
   rm -rf ./data/*
@@ -24,7 +24,7 @@ for main_run in {1..2}; do
   data="armman"
   save_string="ce_rmabppo_test"
   robust_keyword="sample_random"
-  n_train_epochs=10
+  n_train_epochs=100
   seed=0
   cdir="."
   no_hawkins=1

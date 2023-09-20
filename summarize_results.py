@@ -4,7 +4,8 @@ import glob
 
 dfs = {}
 
-for filename in glob.glob('./logs/results/rewards_contin*.csv'):
+##for filename in glob.glob('./logs/results/rewards_contin*.csv'):
+for filename in glob.glob('./logs/results/rewards_armman*.csv'):
     if not os.path.basename(filename).startswith("rewards_"):
         continue
 
@@ -27,12 +28,12 @@ for filename in glob.glob('./logs/results/rewards_contin*.csv'):
 
 for N, df in dfs.items():
     df.sort_index(axis=1, inplace=True)
-    df.to_csv(f'logs/results/summary_continuous_{env}_N{N}.csv')
+    df.to_csv(f'logs/results/summary_armman_{env}_N{N}.csv')
 
 
 dfs = {}
 
-for filename in glob.glob('./logs/results/rewards_count*.csv'):
+for filename in glob.glob('./logs/results/rewards_contin*.csv'):
     if not os.path.basename(filename).startswith("rewards_"):
         continue
 

@@ -497,7 +497,7 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
                 T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
             model.transition_param_arr = T_matrix
-            model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim)
+            model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim, in_dim=model.feature_input_dim)
             model.opt_in = env.params
             for arm_index in range(env.env.N):
                     if model.opt_in[arm_index] < 0.5:
