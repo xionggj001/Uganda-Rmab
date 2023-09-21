@@ -89,9 +89,11 @@ class RobustEnvWrapper():
         return self.env.step(actions, self.params, mode="eval")
 
 class RobustEnvWrapperArmman():
-    def __init__(self, env, nature_policy):
+    def __init__(self, env, params):
+        # params is either nature_params or opt_in.
+        # when we have changing # arms, params is opt_in
 
-        self.nature_policy = nature_policy
+        self.params = params
         self.env = env
 
         # loop over the attributes of the parent class and create those for the decorator
@@ -106,8 +108,7 @@ class RobustEnvWrapperArmman():
         return self.env.reset_random()
 
     def step(self, actions):
-        a_nature = self.nature_policy.get_nature_action(self.env.current_full_state)
-        return self.env.step(actions, a_nature)
+        return self.env.step(actions, self.params, mode="eval")
 
 
 def takeAction(current_states, T, actions, random_stream):
@@ -487,13 +488,16 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
             env.env.update_transition_probs(np.ones(env.env.N))
-            if data_dict['data_type'] == 'sis':
+            if data_dict['dataset_name'] == 'sis':
                 T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
+            elif data_dict['dataset_name'] == 'armman':
+                T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
+                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
                 T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
             model.transition_param_arr = T_matrix
-            model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim)
+            model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim, in_dim=model.feature_input_dim)
             model.opt_in = env.params
             for arm_index in range(env.env.N):
                     if model.opt_in[arm_index] < 0.5:
@@ -804,7 +808,7 @@ if __name__=="__main__":
 
     data_dict['hawkins_lambdas_rl_states'] = []
     data_dict['rl_lambdas'] = []
-    data_dict['data_type'] = args.data
+    data_dict['dataset_name'] = args.data
 
 
 
@@ -983,9 +987,16 @@ if __name__=="__main__":
 
         # print(env.sampled_parameter_ranges)
         # 1/0
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        num_opt_in = int(round(N * opt_in_rate))
+        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        opt_in_status = np.zeros(N)
+        opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
 
 
-        env = RobustEnvWrapperArmman(env, nature_strategy)
+        env = RobustEnvWrapperArmman(env, opt_in_status)
 
 
     if args.data == 'sis':

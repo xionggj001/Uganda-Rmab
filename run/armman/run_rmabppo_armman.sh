@@ -21,10 +21,12 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
 --agent_train_vf_iters 20 \
 --agent_lamb_update_freq 4 \
 --robust_keyword ${8} \
--S 8 \
---pop_size ${11} \
+--opt_in_rate ${11} \
+--agent_tp_transform 'linear' \
+--agent_tp_transform_dims 6 \
+--scheduler_discount 0.95 \
 
-exp_name=${5}_n${6}b${7}d${4}r${8}p${11}
+exp_name=${5}_n${6}b${7}d${4}r${8}p0
 python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
 --budget ${7} \
  --data ${4} \
@@ -36,4 +38,5 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
  --robust_keyword ${8} \
  --file_root ${1} \
  --save_string ${5} \
- --no_hawkins ${10}
+ --no_hawkins ${10} \
+ --opt_in_rate ${11}
