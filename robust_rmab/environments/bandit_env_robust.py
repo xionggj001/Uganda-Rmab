@@ -1139,10 +1139,13 @@ class SISRobustEnv(gym.Env):
 
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        sample_ub = self.sampled_parameter_ranges[0,:,1] # all arms are sampled from the same distribution. so they use the same range
-        sample_lb = self.sampled_parameter_ranges[0,:,0]
+        # sample_ub = self.sampled_parameter_ranges[0,:,1] # all arms are sampled from the same distribution. so they use the same range
+        # sample_lb = self.sampled_parameter_ranges[0,:,0]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
+                # ranges are randomly sampled. then random sample arms from the range
+                sample_ub = self.sampled_parameter_ranges[i, :, 1]
+                sample_lb = self.sampled_parameter_ranges[i, :, 0]
                 new_params = np.random.uniform(low=sample_lb, high=sample_ub)
                 self.param_setting[i, :] = new_params
 

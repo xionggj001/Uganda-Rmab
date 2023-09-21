@@ -317,7 +317,7 @@ class AgentOracle:
         # input dimension for featurize_tp
         feature_input_dim = 4
         if self.data == 'sis':
-            feature_input_dim = 6
+            feature_input_dim = 4
         elif self.data == 'armman':
             feature_input_dim = 6
 
