@@ -33,4 +33,4 @@ Main file for PreFeRMAB, the main algorithm is `agent_oracle.py`
 To run Synthetic dataset from the paper, run 
 `bash run/job.run_rmabppo_counterexample.sh`
 
-Code adapted from https://github.com/killian-34/RobustRMAB
+Code adapted from https://github.com/killian-34/RobustRMAB, the github repo accompanying the paper "Restless and Uncertain: Robust Policies for Restless Bandits via Deep Multi-Agent Reinforcement Learning" in UAI 2023. 
