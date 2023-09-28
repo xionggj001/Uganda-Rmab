@@ -1,7 +1,4 @@
-# Authors: Jackson A. Killian, 4 July, 2021
-# 
-# Adapted from repository by: OpenAI
-#    - https://spinningup.openai.com/en/latest/
+
 
 import numpy as np
 import scipy.signal
