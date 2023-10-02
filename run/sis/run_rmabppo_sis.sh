@@ -40,4 +40,5 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
  --file_root ${1} \
  --save_string ${5} \
  --no_hawkins ${10} \
- --opt_in_rate ${12}
+ --opt_in_rate ${12} \
+ --pop_size ${11} 

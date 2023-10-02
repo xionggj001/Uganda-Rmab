@@ -30,8 +30,8 @@ for main_run in {1..1}; do
   no_hawkins=1
   tp_transform="linear"
   data_type="discrete" #only for approximation tests, can ignore
-  agent_tp_transform_dims=4 # setting the right dim is crucial. dim=4 produces worse results
-  scheduler_discount=0.95 # without the scheduler, performance is worst on B=3 and B=5
+  agent_tp_transform_dims=4 
+  scheduler_discount=0.99
   training_opt_in_rate=0.9
   pop_size=150
  
