@@ -16,15 +16,15 @@ for main_run in {1..1}; do
   rm -rf ./data/*
 
   # Experiment parameters to search
-  N_values=(50) # 25 25
-  B_values=(10.0) #  5.0 7.0
+  N_values=(25) # 25 25
+  B_values=(3.0) #  5.0 7.0
   opt_in_rates=(0.8 0.85 0.9 0.95 1.0)
 
   # Fixed parameters
   data="armman"
   save_string="armman_rmabppo_test"
   robust_keyword="sample_random"
-  n_train_epochs=100
+  n_train_epochs=50
   seed=0
   cdir="."
   no_hawkins=1
@@ -42,7 +42,7 @@ for main_run in {1..1}; do
                                             $robust_keyword $n_train_epochs $no_hawkins $tp_transform $training_opt_in_rate \
                                             $data_type $agent_tp_transform_dims $scheduler_discount
     for opt_in_rate in "${opt_in_rates[@]}"; do
-      for run in {1..5}; do
+      for run in {1..1}; do
         echo -e "\e[1;34m==== RUN $run FOR opt_in_rate=$opt_in_rate ====\e[0m"
         bash run/armman/run_rmabppo_experiment_test.sh $cdir $seed 0 $data $save_string $N $B \
                                                 $robust_keyword $n_train_epochs $no_hawkins $tp_transform $opt_in_rate $data_type

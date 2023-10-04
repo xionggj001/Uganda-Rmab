@@ -487,7 +487,7 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             rl_info['model'] = model
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
-            env.env.update_transition_probs(np.ones(env.env.N))
+            # env.env.update_transition_probs(np.ones(env.env.N))
             if data_dict['dataset_name'] == 'sis':
                 T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
             elif data_dict['dataset_name'] == 'armman':
@@ -902,6 +902,7 @@ if __name__=="__main__":
         np.random.set_state(current_state)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
+        env.env.update_transition_probs(np.ones(env.env.N))
         # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'counterexample':
@@ -948,6 +949,7 @@ if __name__=="__main__":
         np.random.set_state(current_state)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions
+        env.env.update_transition_probs(np.ones(env.env.N))
         # for now, in testing, assume all arms are opt-in.
 
     if args.data == 'armman':
@@ -997,6 +999,7 @@ if __name__=="__main__":
 
 
         env = RobustEnvWrapperArmman(env, opt_in_status)
+        env.env.update_transition_probs(np.ones(env.env.N))
 
 
     if args.data == 'sis':
@@ -1055,6 +1058,7 @@ if __name__=="__main__":
         np.random.set_state(current_state)
 
         env = RobustEnvWrapper(env, opt_in_status)
+        env.env.update_transition_probs(np.ones(env.env.N))
 
 
     valid_action_combinations = None

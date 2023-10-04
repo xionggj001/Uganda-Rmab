@@ -3,6 +3,7 @@ import pandas as pd
 import glob
 
 dfs = {}
+is_std = False
 
 ##for filename in glob.glob('./logs/results/rewards_contin*.csv'):
 for filename in glob.glob('./logs/results/rewards_armman*.csv'):
@@ -19,7 +20,10 @@ for filename in glob.glob('./logs/results/rewards_armman*.csv'):
     opt_in_rate = parts[-2][3:]
     
     df = pd.read_csv(filename)
-    mean_values = df.mean() / int(int(N) * float(opt_in_rate))
+    if is_std:
+        mean_values = df.std() / int(int(N) * float(opt_in_rate))
+    else:
+        mean_values = df.mean() / int(int(N) * float(opt_in_rate))
     
     if B not in dfs:
         dfs[B] = pd.DataFrame()
@@ -29,7 +33,10 @@ for filename in glob.glob('./logs/results/rewards_armman*.csv'):
 
 for B, df in dfs.items():
     df.sort_index(axis=1, inplace=True)
-    df.to_csv(f'logs/results/summary_armman_{env}_B{B}.csv')
+    if is_std:
+        df.to_csv(f'logs/results/summary_armman_std_{env}_B{B}.csv')
+    else:
+        df.to_csv(f'logs/results/summary_armman_{env}_B{B}.csv')
 
 
 ##dfs = {}
