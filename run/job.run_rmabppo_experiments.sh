@@ -21,7 +21,7 @@ for main_run in {1..1}; do
   opt_in_rates=(0.8 0.85 0.9 0.95 1.0)
 
   # Fixed parameters
-  data="continuous_state"
+  data="counterexample"
   save_string="ce_rmabppo_test"
   robust_keyword="sample_random"
   n_train_epochs=100
@@ -31,13 +31,14 @@ for main_run in {1..1}; do
   tp_transform="linear"
   data_type="discrete" #only for approximation tests, can ignore
   agent_tp_transform_dims=4
+  training_opt_in_rate=0.8
 
   for i in "${!N_values[@]}"; do
     N=${N_values[$i]}
     B=${B_values[$i]}
     echo -e "\e[1;31m==== STARTING EXPERIMENT: N=$N, B=$B ====\e[0m"
     bash run/run_rmabppo_experiment_train.sh $cdir $seed 0 $data $save_string $N $B \
-                                            $robust_keyword $n_train_epochs $no_hawkins $tp_transform 0.9 $data_type $agent_tp_transform_dims
+                                            $robust_keyword $n_train_epochs $no_hawkins $tp_transform $training_opt_in_rate $data_type $agent_tp_transform_dims
     for opt_in_rate in "${opt_in_rates[@]}"; do
       for run in {1..1}; do
         echo -e "\e[1;34m==== RUN $run FOR opt_in_rate=$opt_in_rate ====\e[0m"

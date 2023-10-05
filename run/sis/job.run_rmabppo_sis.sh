@@ -7,10 +7,10 @@ n_train_epochs=100
 seed=0
 cdir="."
 no_hawkins=1
-pop_size=150
-opt_in_rate=0.8
+pop_size=100
+opt_in_rate=0.9
 
-bash run/sis/run_rmabppo_sis_test.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${pop_size} ${opt_in_rate}
+bash run/sis/run_rmabppo_sis.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${pop_size} ${opt_in_rate}
 
 
 

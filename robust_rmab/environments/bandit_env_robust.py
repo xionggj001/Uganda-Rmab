@@ -1061,7 +1061,7 @@ class ContinuousStateExampleEnv(gym.Env):
             rewards[i] = self.reward_fun(next_arm_state)
 
         if mode == "eval":
-            rewards[opt_in == 0] = 0 # enforce no reward from opt-out only during test time 
+            rewards[opt_in == 0] = 0 # enforce no reward from opt-out only during test time
         self.current_full_state = next_full_state
         next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
         # print('rewards', rewards)

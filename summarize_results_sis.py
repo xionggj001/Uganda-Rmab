@@ -3,7 +3,7 @@ import pandas as pd
 import glob
 
 dfs = {}
-is_std = False
+is_std = True
 
 ##for filename in glob.glob('./logs/results/rewards_contin*.csv'):
 for filename in glob.glob('./logs/results/rewards_sis*.csv'):

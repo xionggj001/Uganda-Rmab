@@ -1,4 +1,4 @@
-python3 ${1}/agent_oracle.py --hid 32 -l 2 --gamma 0.9 --cpu 1 \
+python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --exp_name ${5} \
     --home_dir ${1} \
     -s ${2} \
@@ -24,6 +24,7 @@ python3 ${1}/agent_oracle.py --hid 32 -l 2 --gamma 0.9 --cpu 1 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
     --agent_tp_transform_dims 4 \
+    --scheduler_discount 0.95 \
 
 exp_name=${5}_n${6}b${7}d${4}r${8}p0
 python3 ${1}/robust_rmab/simulator.py --discount 0.9 \

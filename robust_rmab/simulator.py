@@ -487,11 +487,11 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             rl_info['model'] = model
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
-            # env.env.update_transition_probs(np.ones(env.env.N))
+            env.env.update_transition_probs(np.ones(env.env.N))
             if data_dict['dataset_name'] == 'sis':
-                T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
+                T_matrix = env.env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
             elif data_dict['dataset_name'] == 'armman':
-                T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
+                T_matrix = env.env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
                 T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
@@ -700,7 +700,8 @@ if __name__=="__main__":
         policies = [0, 6, 21, 102]
 
         if args.no_hawkins:
-            policies = [0, 6, 102]
+            policies = [102, 0, 6] # start with PreFeRMAB to initialize the transition dynamics.
+            # policies = [0, 6, 102]
 
         # policies = [0, 6, 102]
 
@@ -1081,7 +1082,8 @@ if __name__=="__main__":
         env.random_stream.rand()
         
     for i in range(N_TRIALS):
-
+        # in each trial, we use freshly sampled unseen arms
+        # env.env.update_transition_probs(np.ones(env.env.N))
 
         if valid_action_combinations is None:
             combinatorial_policies = set(policies) & set([4, 101])
