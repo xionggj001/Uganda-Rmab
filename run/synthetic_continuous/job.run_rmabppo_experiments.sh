@@ -24,12 +24,12 @@ for main_run in {1..1}; do
   data="continuous_state"
   save_string="ce_rmabppo_test"
   robust_keyword="sample_random"
-  n_train_epochs=50 #100
+  n_train_epochs=20 #100
   seed=0
   cdir="."
   no_hawkins=1
   tp_transform="linear"
-  data_type="continuous" 
+  data_type="discrete" # discrete actions in evaluation
   agent_tp_transform_dims=4
 
   for i in "${!N_values[@]}"; do

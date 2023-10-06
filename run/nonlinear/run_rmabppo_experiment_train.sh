@@ -24,4 +24,3 @@ python3 ${1}/agent_oracle.py --hid 32 -l 2 --gamma 0.9 --cpu 1 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
     --agent_tp_transform_dims ${14} \
-    --scheduler_discount 0.95 \
