@@ -1059,7 +1059,7 @@ if __name__=="__main__":
         np.random.set_state(current_state)
 
         env = RobustEnvWrapper(env, opt_in_status)
-        env.env.update_transition_probs(np.ones(env.env.N))
+        env.env.update_transition_probs(np.ones(env.env.N), mode='eval')
 
 
     valid_action_combinations = None
