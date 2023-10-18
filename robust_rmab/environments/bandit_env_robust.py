@@ -833,16 +833,15 @@ class CounterExampleRobustEnv(gym.Env):
 
         return T, R, C
 
-    def update_transition_probs(self, arms_to_update):
+    def update_transition_probs(self, arms_to_update, mode='train'):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        # t = np.array([[ [0.5, 0.5],
-        #                 [0.5, 0.5]],
-        #
-        #                [[1.0, 0.0],
-        #                 [0.0, -1.]] # only set the param for acting in state 1
-        #              ])
-        sample_ub = [0.6, 0.6, 1.0, 1.0]
+        # sample_ub = [0.6, 0.6, 0.6, 1.0]
+        # sample_lb = [0.4, 0.4, 0.4, 0.0]
+        sample_ub = [0.6, 0.6, 1.0, 1.0] # original distribution
         sample_lb = [0.4, 0.4, 0.8, 0.0]
+        if mode == 'eval': # create distribution shift
+            sample_ub = [0.6, 0.6, 0.6, 1.0]
+            sample_lb = [0.4, 0.4, 0.4, 0.0]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
