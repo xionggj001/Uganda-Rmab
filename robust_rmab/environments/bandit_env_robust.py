@@ -833,16 +833,15 @@ class CounterExampleRobustEnv(gym.Env):
 
         return T, R, C
 
-    def update_transition_probs(self, arms_to_update):
+    def update_transition_probs(self, arms_to_update, mode='train'):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
-        # t = np.array([[ [0.5, 0.5],
-        #                 [0.5, 0.5]],
-        #
-        #                [[1.0, 0.0],
-        #                 [0.0, -1.]] # only set the param for acting in state 1
-        #              ])
-        sample_ub = [0.6, 0.6, 1.0, 1.0]
+        # sample_ub = [0.6, 0.0, 1.0, 1.0]
+        # sample_lb = [0.4, 0.2, 0.8, 0.0]
+        sample_ub = [0.6, 0.6, 1.0, 1.0] # original distribution
         sample_lb = [0.4, 0.4, 0.8, 0.0]
+        if mode == 'eval': # create distribution shift
+            sample_ub = [0.6, 0.6, 1.0, 1.0]
+            sample_lb = [0.4, 0.4, 0.8, 0.0]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -1023,12 +1022,15 @@ class ContinuousStateExampleEnv(gym.Env):
     def reward_fun(self, state):
         return state
 
-    def update_transition_probs(self, arms_to_update):
+    def update_transition_probs(self, arms_to_update, mode='train'):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
         # if action==0, then next state = current state + Normal(1st entry, 2nd entry)
         # if action==1, then next state = current state + Normal(3rd entry, 4th entry)
         sample_ub = [-0.1, 0.2, 0.5, 0.2]
         sample_lb = [-0.5, 0.2, 0.1, 0.2]
+        if mode == 'eval': # create distribution shift
+            sample_ub = [-0.1, 0.2, 0.5, 0.2]
+            sample_lb = [-0.5, 0.2, 0.1, 0.2]
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
                 new_transition_probs = np.random.uniform(low=sample_lb, high=sample_ub)
@@ -1121,7 +1123,8 @@ class SISRobustEnv(gym.Env):
         self.current_full_state = np.zeros(N)
         self.random_stream = np.random.RandomState()
 
-        self.PARAMETER_RANGES = self.get_parameter_ranges(self.N)
+        # self.PARAMETER_RANGES = self.get_parameter_ranges(self.N, mode='eval') # no distribution shift
+        self.PARAMETER_RANGES = self.get_parameter_ranges(self.N, mode='train') # with distribution shift  
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
         # self.sampled_parameter_ranges = None
@@ -1137,8 +1140,11 @@ class SISRobustEnv(gym.Env):
         self.tanh = torch.nn.Tanh()
         self.sigmoid = torch.nn.Sigmoid()
 
-    def update_transition_probs(self, arms_to_update):
+    def update_transition_probs(self, arms_to_update, mode='train'):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
+        if mode == 'eval':  # in evaluation, arms are only sampled once, so it is fine to do everything here
+            self.PARAMETER_RANGES = self.get_parameter_ranges(self.N, mode='eval')
+            self.sampled_parameter_ranges = self.sample_parameter_ranges()  # shape (n_arms, 4, 2)
         # sample_ub = self.sampled_parameter_ranges[0,:,1] # all arms are sampled from the same distribution. so they use the same range
         # sample_lb = self.sampled_parameter_ranges[0,:,0]
         for i in range(self.N):
@@ -1227,16 +1233,27 @@ class SISRobustEnv(gym.Env):
 
 
     # We will sample ranges from within these to get some extra randomness
-    def get_parameter_ranges(self, N):
-        
+    def get_parameter_ranges(self, N, mode='train'):
         # Wee have four params
 
-        r_t_range = [0.5, 0.99]
-        # This should scale with the number of people?
-        lam_range = [1, 10] # people per day
-        a_effect_1_range = [1, 10] # multiplicative effect on each parameter
-        a_effect_2_range = [1, 10] # multiplicative effect on each parameter
+        # original set up in PreFeRMAB paper
+        # r_t_range = [0.5, 0.99]
+        # # This should scale with the number of people?
+        # lam_range = [1, 10] # people per day
+        # a_effect_1_range = [1, 10] # multiplicative effect on each parameter
+        # a_effect_2_range = [1, 10] # multiplicative effect on each parameter
 
+        # create distribution shift
+        if mode=='train':
+            r_t_range = [0.5, 0.75]
+            lam_range = [1, 5.5] # people per day
+            a_effect_1_range = [1, 5.5] # multiplicative effect on each parameter
+            a_effect_2_range = [1, 5.5] # multiplicative effect on each parameter
+        else: # in evaluation, there is distribution shift
+            r_t_range = [0.75, 0.99]
+            lam_range = [5.5, 10] # people per day
+            a_effect_1_range = [5.5, 10] # multiplicative effect on each parameter
+            a_effect_2_range = [5.5, 10] # multiplicative effect on each parameter
 
         parameter_ranges = np.array([
             [
