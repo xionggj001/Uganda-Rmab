@@ -11,7 +11,7 @@ tp_transform="linear"
 opt_in_rate=0.8
 data_type='discrete'
 
-bash run/run_rmabppo_counterexample_test.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform} ${opt_in_rate} ${data_type}
+bash run/run_rmabppo_counterexample.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B} ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform} ${opt_in_rate} ${data_type}
 
 
 

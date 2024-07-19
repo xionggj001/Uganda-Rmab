@@ -126,11 +126,9 @@ def list_valid_action_combinations(N,C,B,options):
 class MLPActorCriticRMAB(nn.Module):
 
 
-    def __init__(self, observation_space, action_space, opt_in_rate=1.0,
+    def __init__(self, obs_dim, action_space, opt_in_rate=1.0,
                  hidden_sizes=(64,64), input_feat_dim=4, C=None, N=None, B=None,
-                 strat_ind=0, one_hot_encode=True, non_ohe_obs_dim=None,
-                 state_norm=None,
-                 activation=nn.Tanh,
+                 strat_ind=0, activation=nn.Tanh,
                  ):
         super().__init__()
 
@@ -139,14 +137,9 @@ class MLPActorCriticRMAB(nn.Module):
         self.opt_in_rate = opt_in_rate
 
         # one-hot-encode the states for now
-        self.obs_dim = observation_space.shape[0]
-        if not one_hot_encode:
-            self.obs_dim = non_ohe_obs_dim
+        self.obs_dim = obs_dim
 
         self.act_type = 'd' # for discrete
-
-        self.non_ohe_obs_dim = non_ohe_obs_dim
-        self.one_hot_encode = one_hot_encode
 
         # we will only work with discrete actions
         self.act_dim = action_space.shape[0]
@@ -159,7 +152,7 @@ class MLPActorCriticRMAB(nn.Module):
         self.B = B
         self.hidden_sizes = hidden_sizes
         self.activation = activation
-        self.state_norm = state_norm
+        self.state_norm = 1
 
         self.input_feat_dim = input_feat_dim
         self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
@@ -228,8 +221,7 @@ class MLPActorCriticRMAB(nn.Module):
 
     def step(self, obs, lamb):
         with torch.no_grad():
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
 
             a_list = np.zeros(self.N,dtype=int)
             v_list = np.zeros(self.N) # not to confuse with self.v_list
@@ -241,12 +233,7 @@ class MLPActorCriticRMAB(nn.Module):
                 transition_prob = self.feature_arr[i]
                 # need to define transition prob for each arm. maybe hardcode for each arm for now
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
 
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
@@ -271,18 +258,12 @@ class MLPActorCriticRMAB(nn.Module):
 
         with torch.no_grad():
             prob_a_list = np.zeros(self.N)
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
 
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb], transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb], transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb], transition_prob])
 
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
@@ -305,8 +286,7 @@ class MLPActorCriticRMAB(nn.Module):
 
     def get_lambda(self, obs):
         obs = obs.reshape(-1)
-        if not self.one_hot_encode:
-            obs = obs/self.state_norm
+        obs = obs/self.state_norm
         # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
         lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
         lamb = self.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
@@ -319,8 +299,7 @@ class MLPActorCriticRMAB(nn.Module):
         a_list = np.zeros(self.N,dtype=int)
         pi_list = np.zeros((self.N,self.act_dim),dtype=float)
         with torch.no_grad():    
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
@@ -329,12 +308,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
 
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
@@ -372,8 +346,7 @@ class MLPActorCriticRMAB(nn.Module):
         pi_list = np.zeros((self.N,self.act_dim),dtype=float)
         with torch.no_grad(): 
             # print(obs)   
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
@@ -383,12 +356,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 # print(full_obs)
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
@@ -487,8 +455,7 @@ class MLPActorCriticRMAB(nn.Module):
         a_list = np.zeros(self.N,dtype=int)
         pi_list = np.zeros((self.N,self.act_dim),dtype=float)
         with torch.no_grad():    
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
@@ -497,12 +464,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
@@ -522,8 +484,7 @@ class MLPActorCriticRMAB(nn.Module):
         obs = obs.reshape(-1)
 
         with torch.no_grad():   
-            if not self.one_hot_encode:
-                    obs = obs/self.state_norm 
+            obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
@@ -532,12 +493,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
@@ -583,8 +539,7 @@ class MLPActorCriticRMAB(nn.Module):
         obs = obs.reshape(-1)
 
         with torch.no_grad():   
-            if not self.one_hot_encode:
-                    obs = obs/self.state_norm 
+            obs = obs/self.state_norm
 
             # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
             lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
@@ -593,12 +548,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                if self.one_hot_encode:
-                    ohs = np.zeros(self.obs_dim)
-                    ohs[int(obs[i])] = 1
-                    full_obs = np.concatenate([ohs,[lamb],transition_prob])
-                else:
-                    full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
