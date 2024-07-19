@@ -278,10 +278,6 @@ class AgentOracle:
 
         # input dimension for featurize_tp
         feature_input_dim = 4
-        if self.data == 'sis':
-            feature_input_dim = 4
-        elif self.data == 'armman':
-            feature_input_dim = 6
 
         def featurize_tp(transition_probs, transformation=None, out_dim=4, in_dim=4):
             N = transition_probs.shape[0]
@@ -495,14 +491,9 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'sis':
-                    T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
-                elif self.data == 'armman':
-                    T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
-                    T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                elif self.data == 'uganda':
+                if self.data == 'uganda':
                     T_matrix = env.features
-                else:
+                if self.data == 'continuous_state':
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
                     T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                     T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
@@ -622,12 +613,9 @@ class AgentOracle:
 
 
         env.update_transition_probs(np.ones(env.N))
-        if self.data == 'sis':
-            T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
-        elif self.data == 'armman':
-            T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
-            T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-        else:
+        if self.data == 'uganda':
+            T_matrix = env.features
+        if self.data == 'coontinuous_state':
             T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
             T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
 
@@ -741,12 +729,7 @@ if __name__ == '__main__':
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
     parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
-                        choices=[   
-                                    'random',
-                                    'armman',
-                                    'counterexample',
-                                    'sis',
-                                    'continuous_state',
+                        choices=[   'continuous_state',
                                     'uganda'
                                 ])
 

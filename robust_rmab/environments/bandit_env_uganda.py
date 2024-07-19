@@ -10,6 +10,8 @@ from scipy.stats import ks_2samp
 import seaborn as sns
 import math
 import pandas as pd
+import gym
+import os
 
 
 #Hyperparameters for 3 settings
@@ -197,7 +199,7 @@ def create_model():
   f_name_f=setting+"-"+str(time_size)+"-"+str(min_entries)+"-"+str(sample_size)+"-"+'-'.join(vital_signs)+"_full.csv"
   f_name_p=setting+"-"+str(time_size)+"-"+str(min_entries)+"-"+str(sample_size)+"-"+'-'.join(vital_signs)+".csv"
   if os.path.isfile("./preprocessed_files/"+f_name_f):
-    print("File exists")
+    print("Found Preprocessed File")
     df=pd.read_csv("./preprocessed_files/"+f_name_f)
     pivot_df=pd.read_csv("./preprocessed_files/"+f_name_p)
     df['generatedat'] = pd.to_datetime(df['generatedat'])
@@ -271,15 +273,6 @@ def create_model():
     pivot_df.to_csv("./preprocessed_files/"+f_name_p)
 
 
-
-
-
-  for vital_sign in vital_signs:
-    sns.histplot(pivot_df[vital_sign], kde=True)
-    plt.title('Distribution of Column Name')
-    plt.show()
-
-
   min_max={}
   for sign in vital_signs:
       min_max[sign] = [pivot_df[sign].min(),pivot_df[sign].max()]
@@ -298,21 +291,12 @@ def create_model():
   clean_data(vital_signs,rev_df,min_max)
 
 
-  '''
-  filtered_df = rev_df[(rev_df['reward'] >= -10) & (rev_df['reward'] < 0)]
-
-  # Plot the filtered data
-  sns.histplot(filtered_df['reward'], kde=True)
-  plt.title('Distribution of Reward (0 to -100)')
-  plt.show()
-  '''
-
 
   f_name_t=setting+"-"+str(time_size)+"-"+str(min_entries)+"-"+str(sample_size)+"-"+'-'.join(vital_signs)+"_train.npy"
   f_name_v=setting+"-"+str(time_size)+"-"+str(min_entries)+"-"+str(sample_size)+"-"+'-'.join(vital_signs)+"_patients.npy"
 
   if os.path.isfile("./preprocessed_files/"+f_name_t):
-    print("File exists")
+    print("Found Preprocessed File")
     valid_patient_ids=np.load("./preprocessed_files/"+f_name_v)
     combined_training=np.load("./preprocessed_files/"+f_name_t)
   else:
@@ -465,12 +449,16 @@ def resample_values(gmm,min_max,component_index=None):
 class UgandaEnv(gym.Env):
     def __init__(self, N, B, seed):
         self.N = N
-        gmm, min_max = create_model()
+        self.gmm, self.min_max = create_model()
         self.features = np.zeros((self.N, 8))
-        self.arm_component = np.zeros(self.N)
+        self.arm_component = np.zeros(self.N, dtype=np.int8)
         S = 4
         A = 2
-        # N = 3
+        # initialize arm_component
+        for i in range(self.N):
+            state, component, mean, cov = sample_agent(self.gmm, self.min_max)
+            self.features[i] = mean
+            self.arm_component[i] = component
 
         self.observation_space = np.arange(S)
         self.action_space = np.arange(A)
@@ -491,15 +479,11 @@ class UgandaEnv(gym.Env):
         self.seed(seed=seed)
         self.C = np.array([0, 1])
 
-
-        return 0, 0, C # first two are dummy values previous used for Transition matrix and reward
-
-
     def update_transition_probs(self, arms_to_update):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
-                state, component, mean, cov = sample_agent(gmm, min_max)
+                state, component, mean, cov = sample_agent(self.gmm, self.min_max)
                 self.features[i] = mean
                 self.arm_component[i] = component
 
@@ -516,7 +500,7 @@ class UgandaEnv(gym.Env):
         for i in range(self.N):
             current_arm_state = self.current_full_state[i]  # want continuous states. not rounded
             action = int(a_agent[i])
-            next_arm_state, reward = simulate_one_step(gmm, current_arm_state, min_max,
+            next_arm_state, reward = simulate_one_step(self.gmm, current_arm_state, self.min_max,
                                     intervention=action, component_index=self.arm_component[i])
             # next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state[i] = next_arm_state
@@ -537,8 +521,8 @@ class UgandaEnv(gym.Env):
 
     def reset(self):
         for i in range(self.N):
-            self.current_full_state[i], _ = resample_values(gmm, min_max,
-                                                component_index=self.arm_component)
+            self.current_full_state[i], _ = resample_values(self.gmm, self.min_max,
+                                                component_index=self.arm_component[i])
         # self.current_full_state = self.random_stream.uniform(low=[0] * self.N, high=[1] * self.N)
         return self.current_full_state
 

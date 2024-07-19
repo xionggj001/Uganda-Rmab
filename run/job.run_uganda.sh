@@ -11,7 +11,7 @@ tp_transform=None
 opt_in_rate=1.0
 data_type="discrete"
 
-bash run/synthetic_continuous/run_uganda.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B}  \
+bash run/run_uganda.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B}  \
     ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform} ${opt_in_rate}
 
 
