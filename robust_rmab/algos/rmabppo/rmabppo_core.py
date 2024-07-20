@@ -135,6 +135,7 @@ class MLPActorCriticRMAB(nn.Module):
         self.feature_arr = np.zeros((N, input_feat_dim))
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
         self.opt_in_rate = opt_in_rate
+        self.state_norm = 1
 
         # one-hot-encode the states for now
         self.obs_dim = obs_dim
@@ -152,7 +153,6 @@ class MLPActorCriticRMAB(nn.Module):
         self.B = B
         self.hidden_sizes = hidden_sizes
         self.activation = activation
-        self.state_norm = 1
 
         self.input_feat_dim = input_feat_dim
         self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
@@ -165,7 +165,7 @@ class MLPActorCriticRMAB(nn.Module):
         # need to change this eventually
         lambda_hidden_sizes = [8, 8]
         transition_prob_dim = int(N * input_feat_dim)
-        self.lambda_net = MLPLambdaNet(N + transition_prob_dim, lambda_hidden_sizes, activation)
+        self.lambda_net = MLPLambdaNet(N * 4 + transition_prob_dim, lambda_hidden_sizes, activation)
         # self.lambda_net = MLPLambdaNet(N, lambda_hidden_sizes, activation)
 
         self.name = "RMABPPO"
@@ -233,8 +233,7 @@ class MLPActorCriticRMAB(nn.Module):
                 transition_prob = self.feature_arr[i]
                 # need to define transition prob for each arm. maybe hardcode for each arm for now
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
-
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
                 a = pi.sample()
@@ -263,7 +262,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb], transition_prob])
+                full_obs = np.concatenate([obs[i],[lamb], transition_prob])
 
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
@@ -308,7 +307,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
 
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
@@ -356,7 +355,8 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                breakpoint()
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 # print(full_obs)
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
@@ -447,33 +447,6 @@ class MLPActorCriticRMAB(nn.Module):
         # print(actions)                
         return actions
 
-    # Multi-action implementation
-    # Not implemented yet...
-    def act_test_deterministic_knapsack(self, obs):
-        # print("Enforcing budget constraint on action")
-
-        a_list = np.zeros(self.N,dtype=int)
-        pi_list = np.zeros((self.N,self.act_dim),dtype=float)
-        with torch.no_grad():    
-            obs = obs/self.state_norm
-
-            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
-            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
-
-            for i in range(self.N):
-                transition_prob = self.feature_arr[i]
-                full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
-                full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
-
-                pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
-                pi_list[i] = pi
-
-            
-
-                
-        return a_list
 
     # Currently only implemented for binary action
     def act_test_stochastic_binary(self, obs):
@@ -493,7 +466,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
@@ -548,7 +521,7 @@ class MLPActorCriticRMAB(nn.Module):
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                full_obs = np.concatenate([[obs[i]],[lamb],transition_prob])
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()

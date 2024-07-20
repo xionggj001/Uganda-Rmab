@@ -6,6 +6,7 @@ from itertools import product
 
 from robust_rmab.environments.bandit_env import SISBanditEnv, RandomBanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT, ContinuousStateExampleEnv
+from robust_rmab.environments.bandit_env_uganda import UgandaEnv
 
 import os
 import os.path as osp
@@ -205,65 +206,6 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         return actions
 
 
-
-    # Hawkins - must be discrete
-    elif policy_option==21:
-
-        actions = np.zeros(N)
-        # if T is a FakeT, we can't actually run Hawkins
-        # use to avoid headahces when running sis
-        if isinstance(T, FakeT):
-            return actions
-
-        lambda_lim = R.max()/(C[C>0].min()*(1-gamma))
-
-        indexes = np.zeros((N, C.shape[0], T.shape[1]))
-        current_state = current_state.reshape(-1)
-        current_state = current_state.astype(int)
-        L_vals, lambda_val, obj_val = lp_methods.hawkins(T, R, C, B, current_state, lambda_lim=lambda_lim, gamma=gamma)
-
-
-        for i in range(N):
-            for a in range(C.shape[0]):
-                for s in range(T.shape[1]):
-                    indexes[i,a,s] = R[i,s] - lambda_val*C[a] + gamma*L_vals[i].dot(T[i,s,a])
-        data_dict['hawkins_lambda'].append(lambda_val)
-        if args.just_hawkins_lambda:
-            print('state', current_state)
-            print('L_vals', L_vals)
-            print('lambda',lambda_val)
-            print('obj_val',obj_val)
-            1/0
-
-        indexes_per_state = np.zeros((N, C.shape[0]))
-        for i in range(N):
-            s = current_state[i]
-            print(s)
-            indexes_per_state[i] = indexes[i,:,s]
-
-        # start = time.time()
-
-        decision_matrix = lp_methods.action_knapsack(indexes_per_state, C, B)
-
-        actions = np.argmax(decision_matrix, axis=1)
-
-        if not (decision_matrix.sum(axis=1) <= 1).all(): raise ValueError("More than one action per person")
-
-        payment = 0
-        for i in range(len(actions)):
-            payment += C[actions[i]]
-        if not payment <= B:
-            print("budget")
-            print(B)
-            print("Cost")
-            print(C)
-            print("ACTIONS")
-            print(actions)
-            raise ValueError("Over budget")
-
-        return actions
-
-
     # LP to compute the index policies (online vs. oracle version)
     elif policy_option==22:
 
@@ -359,71 +301,24 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
 
 
 
-    # State-based random
-    # note this is only implemented for single action right now
-    # and only meant for the 2state data
-    elif policy_option==25:
-
-        actions = np.zeros(N,dtype=int)
-        if current_state.all():
-            arm_inds = np.arange(N)
-            choices = np.random.choice(arm_inds, B, replace=False)
-            actions[choices] = 1
-        else:
-            state0_inds = np.argwhere(current_state == 0.0).reshape(-1)
-
-            choices = np.random.choice(state0_inds, B, replace=False)
-            actions[choices] = 1
-
-        return actions
-
-
-
-    # combination RL - not sure if this needs to be distinct from lambda RL yet
-    elif policy_option == 101:
-
-        if rl_info['data_type'] == 'continuous':
-            action = get_action_rl(rl_info['model'], (current_state.reshape(-1)))
-            return action.reshape(N,-1)
-
-        elif rl_info['data_type'] == 'discrete':
-            current_state=current_state.reshape(-1)
-            action = get_action_rl(rl_info['model'], current_state)
-            a = valid_action_combinations[action]
-            print(a)
-            return a
 
 
 
 
     # RMAB RL - returns an N-length action vector
     elif policy_option == 102:
-        if rl_info['data_type'] == 'continuous':
-            actions = get_action_rl(rl_info['model'], (current_state))
-            payment = C(actions).sum()
-            EPS = 1e-6
-            if payment - EPS > B: raise ValueError("Over budget",payment)
-            return actions
-        elif rl_info['data_type'] == 'discrete':
-            actions = get_action_rl(rl_info['model'], current_state)
-            payment = 0
-            for a in actions:
-                payment+= C[a]
-            EPS = 1e-6
-            if payment - EPS > B: raise ValueError("Over budget",payment)
-
-            if rl_info['compute_hawkins_lambda']:
-                lambda_lim = R.max()/(C[C>0].min()*(1-gamma))
-                current_state = current_state.reshape(-1)
-                current_state = current_state.astype(int)
-                _, lambda_val, _ = lp_methods.hawkins(T, R, C, B, current_state, lambda_lim=lambda_lim, gamma=gamma)
-                data_dict['hawkins_lambdas_rl_states'].append(lambda_val)
-
-                rl_lambda_val = rl_info['model'].get_lambda(current_state)
-                data_dict['rl_lambdas'].append(rl_lambda_val)
-
-
-            return actions
+        actions = get_action_rl(rl_info['model'], (current_state))
+        payment = C(actions).sum()
+        EPS = 1e-6
+        if payment - EPS > B: raise ValueError("Over budget",payment)
+        return actions
+        # elif rl_info['data_type'] == 'discrete':
+        #     actions = get_action_rl(rl_info['model'], current_state)
+        #     payment = 0
+        #     for a in actions:
+        #         payment+= C[a]
+        #     EPS = 1e-6
+        #     if payment - EPS > B: raise ValueError("Over budget",payment)
 
 
 # make function for producing an action given a single state
@@ -488,11 +383,8 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
             env.env.update_transition_probs(np.ones(env.env.N), mode='eval')
-            if data_dict['dataset_name'] == 'sis':
-                T_matrix = env.env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
-            elif data_dict['dataset_name'] == 'armman':
-                T_matrix = env.env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
-                T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
+            if data_dict['dataset_name'] == 'uganda':
+                T_matrix = env.features
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
                 T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
@@ -606,14 +498,7 @@ if __name__=="__main__":
     parser.add_argument('-opt', '--opt_in_rate', default=1.0, type=float, help='Maximum reward')
 
     parser.add_argument('-d', '--data', default='real', type=str,help='Method for generating transition probabilities',
-                            choices=[   'SIS_old',
-                                        'random',
-                                        'random_reset',
-                                        'circulant', 
-                                        'toy_robust',
-                                        'armman',
-                                        'counterexample',
-                                        'sis',
+                            choices=[   'uganda',
                                         'continuous_state'
                                     ])
 
@@ -635,7 +520,6 @@ if __name__=="__main__":
 
     parser.add_argument('-rlmfc', '--rl_combinatorial_model_filepath', default=None, type=str, help='path to Combinatorial RL model file if using')
     parser.add_argument('-rlmfr', '--rl_rmab_model_filepath', default=None, type=str, help='path to RMAB RL model file if using')
-    parser.add_argument('-dt', '--data_type', default='discrete', type=str, choices=['continuous','discrete'], help='Whether data is continuous or discrete')
     parser.add_argument('-jhl', '--just_hawkins_lambda', default=False, type=bool, help='Just output the Hawkins lambda value')
 
     parser.add_argument('-nh', '--no_hawkins', default=0, type=int, help='If set, will not run Hawkins')
@@ -780,7 +664,6 @@ if __name__=="__main__":
     rl_info = {
         'model_file_path_combinatorial':args.rl_combinatorial_model_filepath,
         'model_file_path_rmab':args.rl_rmab_model_filepath,
-        'data_type':args.data_type,
         'compute_hawkins_lambda':False
 
     }
@@ -833,8 +716,6 @@ if __name__=="__main__":
     env=None
 
 
-    one_hot_encode = True
-    non_ohe_obs_dim = None
 
     # use np global seed for rolling random data, then for random algorithmic choices
     seedbase = first_seedbase
@@ -845,55 +726,15 @@ if __name__=="__main__":
     # make the same choices, should create the same world for same seed)
     world_seed_base = first_world_seedbase
 
-    if args.data =='SIS':
-        REWARD_BOUND = 1
-        population_sizes = np.array([args.population_size]*N)
-        init_infection_size = args.init_infection_size
-        env = SISBanditEnv(N, population_sizes, B, seedbase, init_infection_size, REWARD_BOUND)
-        C = env.costs_all
-
-    if args.data =='random':
-        REWARD_BOUND = 1
-        env = RandomBanditEnv(N, S, A, B, seedbase, REWARD_BOUND)
-        T = env.T
-        R = env.R
-        C = env.C
-
-    if args.data =='random_reset':
-        REWARD_BOUND = 1
-        env = RandomBanditResetEnv(N, S, A, B, seedbase, REWARD_BOUND)
-        T = env.T
-        R = env.R
-        C = env.C
-
-    if args.data =='circulant':
-
-        env = CirculantDynamicsEnv(N, B, seedbase)
-        T = env.T
-        R = env.R
-        C = env.C
-
-
-    if args.data =='toy_robust':
-
-        env = ToyRobustEnv(N, B, seedbase)
-        T = env.T
-        R = env.R
-        C = env.C
-
-        nature_actions = [0.75,0.75]
-
-        env = RobustEnvWrapper(env, nature_actions)
 
     if args.data == 'continuous_state':
-        env = ContinuousStateExampleEnv(N, B, seedbase, rl_info['data_type'])
+        env = ContinuousStateExampleEnv(N, B, seedbase)
         # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
 
         T = env.T
         R = env.R
         C = env.C
 
-        
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
         num_opt_in = int(round(N * opt_in_rate))
@@ -906,90 +747,14 @@ if __name__=="__main__":
         env.env.update_transition_probs(np.ones(env.env.N))
         # for now, in testing, assume all arms are opt-in.
 
-    if args.data == 'counterexample':
-        from robust_rmab.baselines.nature_baselines_counterexample import   (
-                    RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
-                    OptimisticNaturePolicy, DetermNaturePolicy, SampledRandomNaturePolicy
-                )
-        env_fn = lambda : CounterExampleRobustEnv(N,B,seedbase)
-
-        env = env_fn()
-        sampled_nature_parameter_ranges = env.sample_parameter_ranges()
-        # important to make sure these are always the same for all instatiations of the env
-        env.sampled_parameter_ranges = sampled_nature_parameter_ranges
-
-        nature_strategy = None
-        if args.robust_keyword == 'mid':
-            nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
-            middle_nature_params = sampled_nature_parameter_ranges.mean(axis=-1)
-            T = env.get_T_for_a_nature(middle_nature_params)
-        if args.robust_keyword == 'sample_random':
-            nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-            # init the random strategy
-            nature_strategy.sample_param_setting(seedbase)
-            sampled_nature_params = nature_strategy.param_setting
-
-            T = env.get_T_for_a_nature(sampled_nature_params)
-
-        # N = 3
-        # env = CounterExampleRobustEnv(B, seedbase)
-        # T = env.T
-        R = env.R
-        C = env.C
-
-        nature_actions = nature_strategy.get_nature_action(None)
-
+    if args.data == 'uganda':
+        env = UgandaEnv(N, B, seedbase)
         # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
-        current_state = np.random.get_state()
-        np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
-        np.random.set_state(current_state)
 
-        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions
-        env.env.update_transition_probs(np.ones(env.env.N), mode='eval')
-        # for now, in testing, assume all arms are opt-in.
-
-    if args.data == 'armman':
-        from robust_rmab.baselines.nature_baselines_armman import   (
-                            RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
-                            OptimisticNaturePolicy, SampledRandomNaturePolicy
-                        )
-        env_fn = lambda: ARMMANRobustEnv(N,B,seedbase)
-
-        env = env_fn()
-        sampled_nature_parameter_ranges = env.sample_parameter_ranges()
-        # important to make sure these are always the same for all instatiations of the env
-        env.sampled_parameter_ranges = sampled_nature_parameter_ranges
-
-        nature_strategy = None
-        if args.robust_keyword == 'mid':
-            nature_strategy = MiddleNaturePolicy(sampled_nature_parameter_ranges, 0)
-            middle_nature_params = sampled_nature_parameter_ranges.mean(axis=-1)
-            T = env.get_T_for_a_nature(middle_nature_params)
-
-        if args.robust_keyword == 'sample_random':
-            nature_strategy = SampledRandomNaturePolicy(sampled_nature_parameter_ranges, 0)
-
-            # init the random strategy
-            nature_strategy.sample_param_setting(seedbase)
-            sampled_nature_params = nature_strategy.param_setting
-
-            T = env.get_T_for_a_nature(sampled_nature_params)
-
-        # N = 3
-        # env = CounterExampleRobustEnv(B, seedbase)
-        # T = env.T
-        R = env.R
+        T = 0
+        R = 0
         C = env.C
 
-        # nature_actions = nature_strategy.get_nature_action(None)
-
-        # print(env.sampled_parameter_ranges)
-        # 1/0
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
         num_opt_in = int(round(N * opt_in_rate))
@@ -998,9 +763,9 @@ if __name__=="__main__":
         opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
 
-
-        env = RobustEnvWrapperArmman(env, opt_in_status)
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
+        # for now, in testing, assume all arms are opt-in.
 
 
     if args.data == 'sis':
@@ -1011,8 +776,7 @@ if __name__=="__main__":
         env_fn = lambda: SISRobustEnv(N,B,args.pop_size,seedbase)
         
         # don't one hot encode this state space...
-        one_hot_encode = False
-        non_ohe_obs_dim = 1
+
         POP_SIZE_LIM = 2000
 
 
@@ -1166,7 +930,7 @@ if __name__=="__main__":
     values_for_df=values_for_df.T
 
     df = pd.DataFrame(values_for_df, columns=labels)
-    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s_tp-%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate, args.data_type)
+    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s_tp-%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate)
     if os.path.exists(fname):
         df.to_csv(fname, mode='a', header=False, index=False)
     else:

@@ -462,7 +462,7 @@ class UgandaEnv(gym.Env):
 
         self.observation_space = np.arange(S)
         self.action_space = np.arange(A)
-        self.observation_dimension = 4
+        self.observation_dimension = 4 # 4 vital signs
         self.action_dimension = 1
         self.action_dim_nature = N
         self.S = S
@@ -470,7 +470,7 @@ class UgandaEnv(gym.Env):
         self.B = B
         self.init_seed = seed
 
-        self.current_full_state = np.zeros((N, 4)) # 4 vital signs
+        self.current_full_state = np.zeros((N, self.observation_dimension))
         self.random_stream = np.random.RandomState()
 
         # make sure to set this whenever environment is created, but do it outside so it always the same
@@ -479,7 +479,7 @@ class UgandaEnv(gym.Env):
         self.seed(seed=seed)
         self.C = np.array([0, 1])
 
-    def update_transition_probs(self, arms_to_update):
+    def update_transition_probs(self, arms_to_update, mode='train'):
         # arms_to_update is 1d array of length N. arms_to_update[i] == 1 if transition prob of arm i needs to be resampled
         for i in range(self.N):
             if arms_to_update[i] > 0.5:
@@ -495,7 +495,7 @@ class UgandaEnv(gym.Env):
 
     def step(self, a_agent, opt_in, mode="train"):
         ###### Get next state
-        next_full_state = np.zeros(self.N, dtype=float)
+        next_full_state = np.zeros((self.N, self.observation_dimension), dtype=float)
         rewards = np.zeros(self.N)
         for i in range(self.N):
             current_arm_state = self.current_full_state[i]  # want continuous states. not rounded
@@ -505,13 +505,12 @@ class UgandaEnv(gym.Env):
             # next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state[i] = next_arm_state
             if opt_in[i] < 0.5:
-                next_full_state[i] = 0  # opt-out arms have dummy state
+                next_full_state[i] *= 0  # opt-out arms have dummy state
             rewards[i] = reward
 
         if mode == "eval":
             rewards[opt_in == 0] = 0 # enforce no reward from opt-out only during test time
         self.current_full_state = next_full_state
-        next_full_state = next_full_state.reshape(self.N, self.observation_dimension)
         # print('rewards', rewards)
 
         return next_full_state, rewards, False, None

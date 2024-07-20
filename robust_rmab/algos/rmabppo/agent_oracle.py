@@ -183,6 +183,7 @@ class AgentOracle:
         if data == 'uganda':
             self.env_fn = lambda: UgandaEnv(N, B, seed)
 
+        self.state_norm = 1
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
 
@@ -305,7 +306,6 @@ class AgentOracle:
             # this line below may not be necessary, if the transition_probs are stored as float32
             # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             obs = obs/self.state_norm
-            obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
             full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_pi_list = np.zeros(env.N,dtype=object)
@@ -352,7 +352,6 @@ class AgentOracle:
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
 
             obs = obs/self.state_norm
-            obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
             full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
@@ -464,7 +463,7 @@ class AgentOracle:
         current_lamb = 0
 
         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-        o = o.reshape(-1)
+        # o = o.reshape(-1)
 
         INIT_LAMBDA_TRAINS = init_lambda_trains
 
@@ -472,7 +471,7 @@ class AgentOracle:
         for i in range(INIT_LAMBDA_TRAINS):
             init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
             init_lambda_optimizer.zero_grad()
-            loss_lamb = ac.return_large_lambda_loss(o, gamma)
+            loss_lamb = ac.return_large_lambda_loss(o.reshape(-1), gamma)
 
             loss_lamb.backward()
             last_param = list(ac.lambda_net.parameters())[-1]
@@ -502,8 +501,8 @@ class AgentOracle:
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
                         ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
-                lambda_net_input = np.concatenate((o, ac.feature_arr.flatten()))
-                current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
+                lambda_net_input = np.concatenate((o.reshape(-1), ac.feature_arr.flatten())) # this is very high dimensional
+                current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32)) # fix lambda network dim. need to match the feature dim
                 # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
                 logger.store(Lamb=current_lamb)
 
@@ -516,21 +515,10 @@ class AgentOracle:
 
             for t in range(local_steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                # a_nature is 1d array of length N, encoding the transition probs
-                # a_nature = nature_pol.get_nature_action(torch_o)
-                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
-
-                # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
-
+                assert torch_o.shape[0] == env.N and torch_o.shape[1] == env.observation_dimension
                 a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
-
-                # if (local_steps_per_epoch - t) < 25:
-                    # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
-
-                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
                 next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
-                
-                next_o = next_o.reshape(-1)
+                # next_o = next_o.reshape(-1)
                 
                 actual_r = r.sum()
                 cost_vec = np.zeros(env.N)
@@ -542,9 +530,6 @@ class AgentOracle:
                 ep_actual_ret += actual_r.sum()
                 ep_lamb_adjusted_ret += lamb_adjusted_r
                 ep_len += 1
-
-
-
 
                 # save and log
                 buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
@@ -585,7 +570,7 @@ class AgentOracle:
                     # if terminal:
                     logger.store(EpActualRet=ep_actual_ret, EpLambAdjRet=ep_lamb_adjusted_ret, EpLen=ep_len)
                     o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-                    o = o.reshape(-1)
+                    # o = o.reshape(-1)
 
 
             # Save model
@@ -640,7 +625,7 @@ class AgentOracle:
         env.seed(seed)
 
         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-        o = o.reshape(-1)
+        # o = o.reshape(-1)
        
         rewards = np.zeros((epochs, steps_per_epoch))
         for epoch in range(epochs):
@@ -648,36 +633,19 @@ class AgentOracle:
 
             for t in range(steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                # a_nature = nature_pol.get_nature_action(torch_o)
-                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
-
-                # currently this function is never used.
-                # # should update features here (if we use this function at some point)
-
 
                 a_agent  = agent_pol.act_test(torch_o)
-                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
                 next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
-
-                next_o = next_o.reshape(-1)
-                
+                # next_o = next_o.reshape(-1)
                 actual_r = r.sum()
-
                 ep_actual_ret += actual_r
-                # ep_lamb_adjusted_ret += lamb_adjusted_r
                 ep_len += 1
 
-
                 rewards[epoch,t] = actual_r*(gamma**t)
-
-                # Update obs (critical!)
                 o = next_o
 
-
-
-            # loop again
             o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-            o = o.reshape(-1)
+            # o = o.reshape(-1)
 
 
 
