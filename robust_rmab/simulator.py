@@ -112,19 +112,19 @@ class RobustEnvWrapperArmman():
         return self.env.step(actions, self.params, mode="eval")
 
 
-def takeAction(current_states, T, actions, random_stream):
-
-    N=len(current_states)
-
-    ###### Get next state
-    next_states=np.zeros(current_states.shape)
-    for i in range(N):
-
-        current_state=int(current_states[i])
-        next_state=np.argmax(random_stream.multinomial(1, T[i, current_state, int(actions[i]), :]))
-        next_states[i]=next_state
-
-    return next_states
+# def takeAction(current_states, T, actions, random_stream):
+#
+#     N=len(current_states)
+#
+#     ###### Get next state
+#     next_states=np.zeros(current_states.shape)
+#     for i in range(N):
+#
+#         current_state=current_states[i]
+#         next_state=np.argmax(random_stream.multinomial(1, T[i, current_state, int(actions[i]), :]))
+#         next_states[i]=next_state
+#
+#     return next_states
 
 
 def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
@@ -308,17 +308,12 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
     # RMAB RL - returns an N-length action vector
     elif policy_option == 102:
         actions = get_action_rl(rl_info['model'], (current_state))
-        payment = C(actions).sum()
+        payment = 0
+        for a in actions:
+            payment+= C[a]
         EPS = 1e-6
         if payment - EPS > B: raise ValueError("Over budget",payment)
         return actions
-        # elif rl_info['data_type'] == 'discrete':
-        #     actions = get_action_rl(rl_info['model'], current_state)
-        #     payment = 0
-        #     for a in actions:
-        #         payment+= C[a]
-        #     EPS = 1e-6
-        #     if payment - EPS > B: raise ValueError("Over budget",payment)
 
 
 # make function for producing an action given a single state
@@ -920,8 +915,8 @@ if __name__=="__main__":
     end=time.time()
     print ("Time taken: {:2f} s".format(end-start))
 
-    for i,p in enumerate(policies):
-        print ('{}: {:.3f} +/- {:.3f}'.format(pname[p], runtimes[:,i].mean(), runtimes[1:,i].std()))
+    # for i,p in enumerate(policies):
+    #     print ('{}: {:.3f} +/- {:.3f}'.format(pname[p], runtimes[:,i].mean(), runtimes[1:,i].std()))
 
     # print("Max state:",max_state)
 
@@ -930,30 +925,8 @@ if __name__=="__main__":
     values_for_df=values_for_df.T
 
     df = pd.DataFrame(values_for_df, columns=labels)
-    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s_tp-%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate)
+    fname = file_root+'/logs/results/rewards_%s_n%s_b%s_opt%s.csv'%(args.data, N, int(args.budget), args.opt_in_rate)
     if os.path.exists(fname):
         df.to_csv(fname, mode='a', header=False, index=False)
     else:
         df.to_csv(fname, index=False)
-
-    ##### do some basic plotting if running at the command line with more than one policy
-    if args.policy<0:
-
-
-        labels = [pname[i] for i in policies_to_plot]
-        values=[round(np.mean(np.array(reward_log[i])), 4) for i in policies_to_plot]
-        # values = np.array(values)
-        # values -= values[0]
-        errors=[np.std(np.array(reward_log[i])) for i in policies_to_plot]
-        vals = [values, errors]
-
-        print('rewards')
-        for i in range(len(labels)):
-            print('{} {} +/- {:.3f}'.format(labels[i], values[i], errors[i]))
-
-
-        barPlot(labels, values, errors, ylabel='Sum of Rewards',
-            title='%s arms, %s call(s) per day; trials: %s; States: %s ' % (N, B, N_TRIALS, args.num_states),
-            filename='img/results_%s_N%s_b%s_L%s_policy%s_data%s_seed%s_S%s.pdf'%(savestring, N,args.budget_frac,L,policy_option,args.data,seedbase,args.num_states), root=args.file_root,
-            bottom=0)
-

@@ -50,7 +50,7 @@ class RMABPPO_Buffer:
         self.act_dim = act_dim
 
 
-    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, q, lamb, logp):
+    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, lamb, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -68,7 +68,6 @@ class RMABPPO_Buffer:
         self.rew_buf[self.ptr] = rew
         self.cost_buf[self.ptr] = cost
         self.val_buf[self.ptr] = val
-        self.q_buf[self.ptr]   = q
         self.lamb_buf[self.ptr] = lamb
         self.logp_buf[self.ptr] = logp
         self.ptr += 1
@@ -366,7 +365,7 @@ class AgentOracle:
             return loss_list
 
         def compute_loss_q(data):
-            # seems unused
+            # currently not used
             print('compute_loss_q. seems this function is unused')
 
             qs, oha, lambdas, transition_probs  = \
@@ -376,7 +375,6 @@ class AgentOracle:
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
 
             obs = obs/self.state_norm
-            obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
             full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
@@ -438,21 +436,14 @@ class AgentOracle:
 
             # Lambda optimization
             if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
-                # for i in range(train_lam_iters):
 
-                # Should only update this once because we only get one sample from the environment
-                # unless we are running parallel instances
-                lambda_optimizer.zero_grad()
-                loss_lamb = compute_loss_lambda(data)
-                
-                loss_lamb.backward()
-                last_param = list(ac.lambda_net.parameters())[-1]
-                # print('last param',last_param)
-                # print('grad',last_param.grad)
-
-                # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
-                lambda_optimizer.step()
-                scheduler_lm.step()
+                # lambda_optimizer.zero_grad()
+                # loss_lamb = compute_loss_lambda(data)
+                #
+                # loss_lamb.backward()
+                # last_param = list(ac.lambda_net.parameters())[-1]
+                # lambda_optimizer.step()
+                # scheduler_lm.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
                 new_arms_indices = ac.update_opt_in()
@@ -467,17 +458,17 @@ class AgentOracle:
 
         INIT_LAMBDA_TRAINS = init_lambda_trains
 
-        # Initialize lambda to make large predictions
-        for i in range(INIT_LAMBDA_TRAINS):
-            init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
-            init_lambda_optimizer.zero_grad()
-            loss_lamb = ac.return_large_lambda_loss(o.reshape(-1), gamma)
-
-            loss_lamb.backward()
-            last_param = list(ac.lambda_net.parameters())[-1]
-
-            # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
-            init_lambda_optimizer.step()
+        # # Initialize lambda to make large predictions
+        # for i in range(INIT_LAMBDA_TRAINS):
+        #     init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+        #     init_lambda_optimizer.zero_grad()
+        #     loss_lamb = ac.return_large_lambda_loss(o.reshape(-1), gamma)
+        #
+        #     loss_lamb.backward()
+        #     last_param = list(ac.lambda_net.parameters())[-1]
+        #
+        #     # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+        #     init_lambda_optimizer.step()
 
         env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
         new_arms_indices = ac.update_opt_in()
@@ -501,9 +492,9 @@ class AgentOracle:
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
                         ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
-                lambda_net_input = np.concatenate((o.reshape(-1), ac.feature_arr.flatten())) # this is very high dimensional
-                current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32)) # fix lambda network dim. need to match the feature dim
-                # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
+                # lambda_net_input = np.concatenate((o.reshape(-1), ac.feature_arr.flatten()))
+                # current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
+                current_lamb = 0
                 logger.store(Lamb=current_lamb)
 
 
@@ -516,7 +507,7 @@ class AgentOracle:
             for t in range(local_steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
                 assert torch_o.shape[0] == env.N and torch_o.shape[1] == env.observation_dimension
-                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
+                a_agent, v, logp= ac.step(torch_o, current_lamb)
                 next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
                 # next_o = next_o.reshape(-1)
                 
@@ -532,7 +523,7 @@ class AgentOracle:
                 ep_len += 1
 
                 # save and log
-                buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
@@ -549,12 +540,12 @@ class AgentOracle:
                         pass
                     # if trajectory didn't reach terminal state, bootstrap value target
                     if timeout or epoch_ended:
-                        print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
+                        print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v)
                         print('opt-in', ac.opt_in)
-                        print('lambda lr', scheduler_lm.get_last_lr()[0])
-                        scheduler_lm.step()
+                        # print('lambda lr', scheduler_lm.get_last_lr()[0])
+                        # scheduler_lm.step()
                         # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
-                        _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
+                        _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
                         

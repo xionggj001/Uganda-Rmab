@@ -222,36 +222,47 @@ class MLPActorCriticRMAB(nn.Module):
     def step(self, obs, lamb):
         with torch.no_grad():
             obs = obs/self.state_norm
-
             a_list = np.zeros(self.N,dtype=int)
             v_list = np.zeros(self.N) # not to confuse with self.v_list
             logp_a_list = np.zeros(self.N)
-            q_list = np.zeros(self.N)
-            a1_probs = np.zeros(self.N)
+            pi_list = np.zeros((self.N, self.act_dim), dtype=float)
 
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 # need to define transition prob for each arm. maybe hardcode for each arm for now
-                full_obs = None
+                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
+                full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
+                pi_list[i] = self.pi_list._distribution(full_obs).probs.detach().numpy()
+
+                v = self.v_list(full_obs)
+                v_list[i] = v.numpy()
+            # play the actions with the largest probs.
+            # need to update and take into account opt-in
+            ACTION  = 1
+            a1_list = pi_list[:,ACTION]
+            sorted_inds = np.argsort(a1_list)[::-1]
+            i = 0
+            budget_spent = 0
+            while budget_spent < self.B and i < self.N:
+                # if taking the next action (greedy) puts over budget, break
+                if budget_spent + self.C[ACTION] > self.B:
+                    break
+                a_list[sorted_inds[i]] = ACTION
+                budget_spent += self.C[ACTION]
+                i+=1
+            # compute loss prob of actions
+            for i in range(self.N):
                 full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
-                a = pi.sample()
-                a1_probs[i] = pi.probs.numpy()[1]
-                logp_a = self.pi_list._log_prob_from_distribution(pi, a)
+                logp_a = self.pi_list._log_prob_from_distribution(pi, torch.tensor(a_list[i], dtype=torch.int8))
                 # logp_a is log of probability of choosing this action.
                 # if a=1, then logp_a=log(a1_probs[i]); else, logp_a=log(1-a1_probs[i])
-                v = self.v_list(full_obs)
                 if self.opt_in[i] < 0.5:
-                    a = torch.tensor(0) # not pull
-                    a1_probs[i] = 0.1 # prob of pulling is near zero
                     logp_a = torch.tensor(np.log(0.1)) # log(0) is undefined, so we use log(0.1)
-
-                a_list[i] = a.numpy()
-                v_list[i] = v.numpy()
                 logp_a_list[i] = logp_a.numpy()
 
-        return a_list, v_list, logp_a_list, q_list, a1_probs
+        return a_list, v_list, logp_a_list
 
     def get_probs_for_all(self, obs, lamb):
 
@@ -278,7 +289,7 @@ class MLPActorCriticRMAB(nn.Module):
         return a
 
     def act_test(self, obs):
-        obs=obs.reshape(-1)
+        # obs=obs.reshape(-1)
         # return self.act_test_deterministic(obs)
         return self.act_test_deterministic_multiaction(obs)
         # return self.act_test_stochastic_multi_action(obs)
@@ -347,28 +358,20 @@ class MLPActorCriticRMAB(nn.Module):
             # print(obs)   
             obs = obs/self.state_norm
 
-            # lamb = self.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
-            lambda_net_input = np.concatenate((obs, self.feature_arr.flatten()))
-            lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
+            # lambda_net_input = np.concatenate((obs.reshape(-1), self.feature_arr.flatten()))
+            # lamb = self.lambda_net(torch.as_tensor(lambda_net_input,dtype=torch.float32))
+            lamb = 0
 
 
             for i in range(self.N):
                 transition_prob = self.feature_arr[i]
                 full_obs = None
-                breakpoint()
                 full_obs = np.concatenate([obs[i],[lamb],transition_prob])
                 # print(full_obs)
                 full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
-                # print(pi)
-
-            # sort each list by its most probable action
-            # then play them in order
-            
-            # a1_list = pi_list[:,ACTION]
-            # print(a1_list)
 
             row_maxes = pi_list.max(axis=1)
             row_order = np.argsort(row_maxes)[::-1]
@@ -389,13 +392,7 @@ class MLPActorCriticRMAB(nn.Module):
                     if self.opt_in[i] < 0.5:
                         arm_a = 0 # 'no pull' action for opt-out arms.
                     a_cost = self.C[arm_a]
-                    
-                    # if difference in price takes us over, we have to stop
-                    # print(actions)
-                    # print(arm)
-                    # print(actions[arm])
-                    # print(C)
-                    # print('budget',budget_spent, 'cost', a_cost, 'action', arm_a, 'arm',arm, 'c',C[actions[arm]])
+
                     if budget_spent + a_cost - self.C[actions[arm]] > self.B:
                         done = True
                         # print('broke here')
@@ -412,17 +409,9 @@ class MLPActorCriticRMAB(nn.Module):
 
                         # also hide all actions that are now too expensive
                         cost_diff_array = np.zeros(pi_list.shape)
-                        # print('actions',actions)
                         for j in range(self.N):
                             cost_diff_array[j] = self.C - self.C[actions[j]]
-                        # print('a\n',a_og)
-                        # print('nowa\n',a)
-                        # print('costdif\n',cost_diff_array)
-                        # print('b',B)
-                        # print('budget',budget_spent)
                         overbudget_action_inds = cost_diff_array > self.B - budget_spent
-                        # print('inds')
-                        # print(overbudget_action_inds)
                         
                         if overbudget_action_inds.any():
                             i = 0
@@ -431,9 +420,6 @@ class MLPActorCriticRMAB(nn.Module):
                             row_order = np.argsort(row_maxes)[::-1]
 
                             pi_arg_maxes = np.argsort(pi_list, axis=1)
-                            # print('maxes',a_maxes)
-                            # print('order',row_order)
-                            # print('maxes',a_arg_maxes)
                         if not pi_list.sum() > 0:
                             done = True
                             break
@@ -444,7 +430,6 @@ class MLPActorCriticRMAB(nn.Module):
 
                 pi_arg_maxes = np.argsort(pi_list, axis=1)
 
-        # print(actions)                
         return actions
 
 
