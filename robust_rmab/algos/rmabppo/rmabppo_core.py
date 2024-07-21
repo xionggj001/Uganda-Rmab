@@ -136,6 +136,11 @@ class MLPActorCriticRMAB(nn.Module):
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
         self.opt_in_rate = opt_in_rate
         self.state_norm = 1
+        # if we give a person the device and later remove it, we can no longer give the same person the device at the same epoch
+        self.arm_device_removed = np.zeros(N)
+        # a person can not use the device for more than a fixed number of steps
+        self.max_device_usage = 50
+        self.arm_device_usage = np.zeros(N) # track for how many steps has this arm used the device
 
         # one-hot-encode the states for now
         self.obs_dim = obs_dim
@@ -240,6 +245,8 @@ class MLPActorCriticRMAB(nn.Module):
             # need to update and take into account opt-in
             ACTION  = 1
             a1_list = pi_list[:,ACTION]
+            # these arms can no longer use the device. set their probs of being selected to be zero. so they will not get selected
+            a1_list[self.arm_device_removed > 0.5] *= 0
             sorted_inds = np.argsort(a1_list)[::-1]
             i = 0
             budget_spent = 0
@@ -248,8 +255,19 @@ class MLPActorCriticRMAB(nn.Module):
                 if budget_spent + self.C[ACTION] > self.B:
                     break
                 a_list[sorted_inds[i]] = ACTION
+                self.arm_device_usage[sorted_inds[i]] += 1
+                if self.arm_device_usage[sorted_inds[i]] >= self.max_device_usage:
+                    # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
+                    self.arm_device_removed[sorted_inds[i]] = 1
                 budget_spent += self.C[ACTION]
                 i+=1
+            # update self.arm_device_removed
+            for i in range(self.N):
+                if self.arm_device_usage[i] > 0 and a_list[i] == 0:
+                    self.arm_device_removed[i] = 1
+                    # this arm used the device, and later we remove the device from this arm.
+                    # thus, according to given constraints, from now on, we can no longer give the device to this arm.
+
             # compute loss prob of actions
             for i in range(self.N):
                 full_obs = np.concatenate([obs[i],[lamb],transition_prob])
@@ -373,6 +391,10 @@ class MLPActorCriticRMAB(nn.Module):
                 pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
                 pi_list[i] = pi
 
+            # these arms can no longer use the device. set their probs of being selected to be zero. so they will not get selected
+            pi_list[self.arm_device_removed > 0.5, 1:] *= 0 # set their prob of action 1 to be zero
+            pi_list[self.opt_in < 0.5, 1:] *= 0 # opt-out arms. set their prob of action 1 to be zero
+
             row_maxes = pi_list.max(axis=1)
             row_order = np.argsort(row_maxes)[::-1]
 
@@ -386,6 +408,7 @@ class MLPActorCriticRMAB(nn.Module):
             while budget_spent < self.B and not done:
 
                 i=0
+
                 while i < self.N:
                     arm = row_order[i]
                     arm_a = pi_arg_maxes[row_order[i]][-1]
@@ -406,6 +429,12 @@ class MLPActorCriticRMAB(nn.Module):
                         # print(a)
 
                         budget_spent = sum(self.C[a] for a in actions)
+                        # update trackers
+                        if arm_a > 0: # we give device to this arm
+                            self.arm_device_usage[arm] += 1
+                            if self.arm_device_usage[arm] >= self.max_device_usage:
+                                # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
+                                self.arm_device_removed[arm] = 1
 
                         # also hide all actions that are now too expensive
                         cost_diff_array = np.zeros(pi_list.shape)
@@ -429,6 +458,13 @@ class MLPActorCriticRMAB(nn.Module):
                 row_order = np.argsort(row_maxes)[::-1]
 
                 pi_arg_maxes = np.argsort(pi_list, axis=1)
+
+        # update self.arm_device_removed
+        for i in range(self.N):
+            if self.arm_device_usage[i] > 0 and actions[i] == 0:
+                self.arm_device_removed[i] = 1
+                # this arm used the device, and later we remove the device from this arm.
+                # thus, according to given constraints, from now on, we can no longer give the device to this arm.
 
         return actions
 

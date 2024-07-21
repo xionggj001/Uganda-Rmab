@@ -621,6 +621,8 @@ class AgentOracle:
         rewards = np.zeros((epochs, steps_per_epoch))
         for epoch in range(epochs):
             # print("epoch",epoch)
+            ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
+            ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
 
             for t in range(steps_per_epoch):
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
@@ -752,19 +754,15 @@ if __name__ == '__main__':
 
     state_norm = None
 
-    if args.data == 'continuous_state':
-        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed)
-
-    if args.data == 'uganda':
-        env_fn = lambda : UgandaEnv(N,B,seed)
-
-
-
-    env = env_fn()
-    #  seems we don't need the line below for DDLPO
-    # sampled_nature_parameter_ranges = env.sample_parameter_ranges()
-    # important to make sure these are always the same for all instatiations of the env
-    # env.sampled_parameter_ranges = sampled_nature_parameter_ranges
+    # if args.data == 'continuous_state':
+    #     env_fn = lambda : ContinuousStateExampleEnv(N,B,seed)
+    #
+    # if args.data == 'uganda':
+    #     env_fn = lambda : UgandaEnv(N,B,seed)
+    #
+    #
+    #
+    # env = env_fn()
 
     agent_oracle  = AgentOracle(data, N, S, A, budget, seed, reward_bound,
                              agent_kwargs=agent_kwargs, home_dir=home_dir, exp_name=exp_name,
