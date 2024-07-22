@@ -503,8 +503,11 @@ class AgentOracle:
             #     nature_pol = np.random.choice(nature_strats,p=nature_eq)
             #     # get transition probs from this nature policy
 
-
+            ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
+            ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
             for t in range(local_steps_per_epoch):
+                # print('removed ', ac.arm_device_removed)
+                # print('usage ', ac.arm_device_usage)
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
                 assert torch_o.shape[0] == env.N and torch_o.shape[1] == env.observation_dimension
                 a_agent, v, logp= ac.step(torch_o, current_lamb)
@@ -605,48 +608,46 @@ class AgentOracle:
         return ac
 
 
-    def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
-            steps_per_epoch=100, epochs=100, gamma=0.99):
-        breakpoint() # seems this function is not used
-        # make a new env for computing returns 
-        env = self.env_fn()
-        # important to make sure these are always the same for all instatiations of the env
-        # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
-
-        env.seed(seed)
-
-        o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-        # o = o.reshape(-1)
-       
-        rewards = np.zeros((epochs, steps_per_epoch))
-        for epoch in range(epochs):
-            # print("epoch",epoch)
-            ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
-            ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
-
-            for t in range(steps_per_epoch):
-                torch_o = torch.as_tensor(o, dtype=torch.float32)
-
-                a_agent  = agent_pol.act_test(torch_o)
-                next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
-                # next_o = next_o.reshape(-1)
-                actual_r = r.sum()
-                ep_actual_ret += actual_r
-                ep_len += 1
-
-                rewards[epoch,t] = actual_r*(gamma**t)
-                o = next_o
-
-            o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-            # o = o.reshape(-1)
-
-
-
-        rewards = rewards.sum(axis=1).mean()
-
-
-        return rewards
-
+    # def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
+    #         steps_per_epoch=100, epochs=100, gamma=0.99):
+    #     env = self.env_fn()
+    #     # important to make sure these are always the same for all instatiations of the env
+    #     # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+    #
+    #     env.seed(seed)
+    #
+    #     o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
+    #     # o = o.reshape(-1)
+    #
+    #     rewards = np.zeros((epochs, steps_per_epoch))
+    #     for epoch in range(epochs):
+    #         # print("epoch",epoch)
+    #         ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
+    #         ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
+    #
+    #         for t in range(steps_per_epoch):
+    #             torch_o = torch.as_tensor(o, dtype=torch.float32)
+    #
+    #             a_agent  = agent_pol.act_test(torch_o)
+    #             next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
+    #             # next_o = next_o.reshape(-1)
+    #             actual_r = r.sum()
+    #             ep_actual_ret += actual_r
+    #             ep_len += 1
+    #
+    #             rewards[epoch,t] = actual_r*(gamma**t)
+    #             o = next_o
+    #
+    #         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
+    #         # o = o.reshape(-1)
+    #
+    #
+    #
+    #     rewards = rewards.sum(axis=1).mean()
+    #
+    #
+    #     return rewards
+    #
 
 
 # python3 spinup/algos/pytorch/ppo/rmab_rl_lambda_ppo.py --hid 64 -l 2 --gamma 0.9 --cpu 1 --step 100 -N 4 -S 2 -A 2 -B 1 --REWARD_BOUND 2 --exp_name rmab_rl_bandit_n4s2a2b1_r2_lambda -s 0 --epochs 1000 --init_lambda_trains 1
