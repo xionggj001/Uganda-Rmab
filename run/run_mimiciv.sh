@@ -7,7 +7,6 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --save_string ${5} \
     -N ${6} -B ${7} \
     --opt_in_rate ${12} \
-    --data_type ${13} \
     --agent_steps 100 \
     --agent_epochs ${9} \
     --agent_init_lambda_trains 0 \
@@ -20,9 +19,23 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --agent_lm_lr 2e-3 \
     --agent_train_pi_iters 20 \
     --agent_train_vf_iters 20 \
-    --agent_lamb_update_freq 6 \
+    --agent_lamb_update_freq 4 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
-    --agent_tp_transform_dims ${14} \
-    --scheduler_discount ${15} \
-    --pop_size ${16} \
+    --agent_tp_transform_dims 6 \
+    --scheduler_discount 0.95 \
+
+exp_name=${5}_n${6}b${7}d${4}r${8}p0
+python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
+    --budget ${7} \
+    --data ${4} \
+    -N ${6} \
+    -opt ${12} \
+    -s ${2} -ws ${2} \
+    -rlmfr ${1}/data/${exp_name}/${exp_name}_s${2}/ \
+    -L 50 \
+    -n 50 \
+    --robust_keyword ${8} \
+    --file_root ${1} \
+    --save_string ${5} \
+    --no_hawkins ${10}

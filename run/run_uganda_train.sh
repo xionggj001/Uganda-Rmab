@@ -7,7 +7,6 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --save_string ${5} \
     -N ${6} -B ${7} \
     --opt_in_rate ${12} \
-    --data_type ${13} \
     --agent_steps 100 \
     --agent_epochs ${9} \
     --agent_init_lambda_trains 0 \
@@ -23,5 +22,6 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --agent_lamb_update_freq 4 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
-    --agent_tp_transform_dims ${14} \
-    --scheduler_discount ${15} \
+    --agent_tp_transform_dims 8 \
+    --scheduler_discount 0.95 \
+

@@ -12,6 +12,8 @@ from robust_rmab.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mp
 from robust_rmab.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
+from robust_rmab.environments.bandit_env_uganda import UgandaEnv
+from robust_rmab.environments.bandit_env_mimiciv import MimicivEnv
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 
@@ -22,18 +24,13 @@ class RMABPPO_Buffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, tp_feats, act_dim, N, act_type, size, one_hot_encode=True, gamma=0.99, lam_OTHER=0.95):
+    def __init__(self, obs_dim, tp_feats, act_dim, N, act_type, size, gamma=0.99, lam_OTHER=0.95):
         self.N = N
         self.obs_dim = obs_dim
-        self.one_hot_encode = one_hot_encode
-        # assume states are {0,1} and actions are {0,1}. so transition probabilities can be encoded by 4 numbers
-        # I suspect the 4 can be replaced by obs_dim * act_dim
         self.transition_probs_buf = np.zeros(core.combined_shape(size, (N, tp_feats)), dtype=np.float32)
-        # binary encoding of opt-in decisions. initialize all states as opt-in
         self.opt_in_buf = np.ones(core.combined_shape(size, N), dtype=np.float32)
 
-        self.obs_buf = np.zeros(core.combined_shape(size, N), dtype=np.float32)
-        self.ohs_buf = np.zeros(core.combined_shape(size, (N, obs_dim)), dtype=np.float32)
+        self.obs_buf = np.zeros(core.combined_shape(size, (N, obs_dim)), dtype=np.float32)
         
         self.act_buf = np.zeros((size, N), dtype=np.float32)
         self.oha_buf = np.zeros(core.combined_shape(size, (N, act_dim)), dtype=np.float32)
@@ -54,17 +51,12 @@ class RMABPPO_Buffer:
         self.act_dim = act_dim
 
 
-    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, q, lamb, logp):
+    def store(self, obs, transition_probs, opt_in, act, rew, cost, val, lamb, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
         assert self.ptr < self.max_size     # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
-        ohs = np.zeros((self.N, self.obs_dim))
-        if self.one_hot_encode:
-            for i in range(self.N):
-                ohs[i, int(obs[i])] = 1
-        self.ohs_buf[self.ptr] = ohs
         self.transition_probs_buf[self.ptr] = transition_probs
         self.opt_in_buf[self.ptr] = opt_in
 
@@ -77,7 +69,6 @@ class RMABPPO_Buffer:
         self.rew_buf[self.ptr] = rew
         self.cost_buf[self.ptr] = cost
         self.val_buf[self.ptr] = val
-        self.q_buf[self.ptr]   = q
         self.lamb_buf[self.ptr] = lamb
         self.logp_buf[self.ptr] = logp
         self.ptr += 1
@@ -159,7 +150,7 @@ class RMABPPO_Buffer:
         
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                 adv=self.adv_buf, logp=self.logp_buf, qs=self.q_buf, oha=self.oha_buf, 
-                ohs=self.ohs_buf, costs=self.cdcost_buf, lambdas=self.lamb_buf,
+                costs=self.cdcost_buf, lambdas=self.lamb_buf,
                 transition_probs=self.transition_probs_buf, opt_in=self.opt_in_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
@@ -168,8 +159,7 @@ class AgentOracle:
 
     def __init__(self, data, N, S, A, B, seed, REWARD_BOUND, agent_kwargs=dict(),
         home_dir="", exp_name="", sampled_nature_parameter_ranges=None, robust_keyword="",
-        pop_size=0, one_hot_encode=True, non_ohe_obs_dim=None, state_norm=None, opt_in_rate=None, data_type="",
-                 scheduler_discount=0.99999):
+        pop_size=0, opt_in_rate=None, scheduler_discount=0.99999):
 
         self.data = data
         self.home_dir = home_dir
@@ -186,31 +176,17 @@ class AgentOracle:
         self.scheduler_discount = scheduler_discount
 
         self.pop_size = pop_size
-        self.one_hot_encode = one_hot_encode
-        self.non_ohe_obs_dim = non_ohe_obs_dim
-        self.state_norm = state_norm
-
-        if data == 'random':
-            self.env_fn = lambda : RandomBanditEnv(N,S,A,B,seed,REWARD_BOUND)
-
-        if data == 'random_reset':
-            self.env_fn = lambda : RandomBanditResetEnv(N,S,A,B,seed,REWARD_BOUND)
-
-        if data == 'armman':
-            self.env_fn = lambda : ARMMANRobustEnv(N,B,seed)
-
-        if data == 'circulant':
-            self.env_fn = lambda : CirculantDynamicsEnv(N,B,seed)
-
-        if data == 'counterexample':
-            self.env_fn = lambda : CounterExampleRobustEnv(N,B,seed)
-
-        if data == 'sis':
-            self.env_fn = lambda : SISRobustEnv(N,B,pop_size,seed)
 
         if data == 'continuous_state':
-            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed, data_type)
+            self.env_fn = lambda: ContinuousStateExampleEnv(N, B, seed)
 
+        if data == 'uganda':
+            self.env_fn = lambda: UgandaEnv(N, B, seed)
+
+        if data == 'mimiciv':
+            self.env_fn = lambda: MimicivEnv(N, B, seed)
+
+        self.state_norm = 1
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
 
@@ -246,7 +222,7 @@ class AgentOracle:
             start_entropy_coeff=0.0, end_entropy_coeff=0.0,
             max_ep_len=1000,
             target_kl=0.01, logger_kwargs=dict(), save_freq=10,
-            lamb_update_freq=10,
+            lamb_update_freq=4,
             init_lambda_trains=0,
             final_train_lambdas=0,
             tp_transform=None):
@@ -264,7 +240,7 @@ class AgentOracle:
         env = self.env
         
         # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
-        obs_dim = env.observation_space.shape
+        obs_dim = env.observation_dimension
 
         # set input dim size given transformation selected 
         # ac_kwargs["input_feat_dim"] refers to how many features generated from input tps
@@ -276,11 +252,8 @@ class AgentOracle:
             print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
         # Create actor-critic module
-        ac = actor_critic(env.observation_space, env.action_space, opt_in_rate=self.opt_in_rate,
-            N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind,
-            one_hot_encode = self.one_hot_encode, non_ohe_obs_dim = self.non_ohe_obs_dim,
-            state_norm=self.state_norm,
-            **ac_kwargs)
+        ac = actor_critic(obs_dim, env.action_space, opt_in_rate=self.opt_in_rate,
+            N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind, **ac_kwargs)
 
         act_dim = ac.act_dim
         obs_dim = ac.obs_dim
@@ -291,9 +264,8 @@ class AgentOracle:
         # Set up experience buffer
         local_steps_per_epoch = int(steps_per_epoch / num_procs())
 
-
         buf = RMABPPO_Buffer(obs_dim, ac_kwargs["input_feat_dim"], act_dim, env.N, ac.act_type, local_steps_per_epoch,
-                        one_hot_encode=self.one_hot_encode, gamma=gamma, lam_OTHER=lam_OTHER)
+                        gamma=gamma, lam_OTHER=lam_OTHER)
 
         FINAL_TRAIN_LAMBDAS = final_train_lambdas
 
@@ -310,10 +282,6 @@ class AgentOracle:
 
         # input dimension for featurize_tp
         feature_input_dim = 4
-        if self.data == 'sis':
-            feature_input_dim = 4
-        elif self.data == 'armman':
-            feature_input_dim = 6
 
         def featurize_tp(transition_probs, transformation=None, out_dim=4, in_dim=4):
             N = transition_probs.shape[0]
@@ -332,20 +300,17 @@ class AgentOracle:
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
-            ohs, act, adv, logp_old, lambdas, obs, transition_probs, opt_in = \
-                data['ohs'], data['act'], data['adv'], data['logp'], data['lambdas'], \
+            act, adv, logp_old, lambdas, obs, transition_probs, opt_in = \
+                data['act'], data['adv'], data['logp'], data['lambdas'], \
                 data['obs'], data['transition_probs'], data['opt_in']
 
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # this line below may not be necessary, if the transition_probs are stored as float32
             # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
-            if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
-            else:
-                obs = obs/self.state_norm
-                obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+            obs = obs/self.state_norm
+            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
@@ -382,18 +347,15 @@ class AgentOracle:
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ohs, ret, lambdas, obs, transition_probs, opt_in = \
-                data['ohs'], data['ret'], data['lambdas'], data['obs'], \
+            ret, lambdas, obs, transition_probs, opt_in = \
+                data['ret'], data['lambdas'], data['obs'], \
                 data['transition_probs'], data['opt_in']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
-            if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
-            else:
-                obs = obs/self.state_norm
-                obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+
+            obs = obs/self.state_norm
+            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -407,20 +369,17 @@ class AgentOracle:
             return loss_list
 
         def compute_loss_q(data):
-            # seems unused
+            # currently not used
             print('compute_loss_q. seems this function is unused')
 
-            ohs, qs, oha, lambdas, transition_probs  = \
-                data['ohs'], data['qs'], data['oha'], data['lambdas'], data['transition_probs']
+            qs, oha, lambdas, transition_probs  = \
+                data['qs'], data['oha'], data['lambdas'], data['transition_probs']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
-            if ac.one_hot_encode:
-                full_obs = torch.cat([ohs, lamb_to_concat, transition_probs], axis=2)
-            else:
-                obs = obs/self.state_norm
-                obs = obs.reshape(obs.shape[0], obs.shape[1], 1)
-                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+
+            obs = obs/self.state_norm
+            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -433,8 +392,7 @@ class AgentOracle:
             disc_cost = data['costs'][0]
             # lamb = data['lambdas'][0]
             obs = data['obs'][0]
-            if not self.one_hot_encode:
-                obs = obs/self.state_norm
+            obs = obs/self.state_norm
             lambda_net_input = np.concatenate((obs, ac.feature_arr.flatten()))
             lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
             # lamb = ac.lambda_net(torch.as_tensor(obs,dtype=torch.float32))
@@ -481,22 +439,16 @@ class AgentOracle:
 
 
             # Lambda optimization
-            if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
-                # for i in range(train_lam_iters):
+            if epoch%lamb_update_freq == 0 and epoch > 0:
+            # if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
 
-                # Should only update this once because we only get one sample from the environment
-                # unless we are running parallel instances
-                lambda_optimizer.zero_grad()
-                loss_lamb = compute_loss_lambda(data)
-                
-                loss_lamb.backward()
-                last_param = list(ac.lambda_net.parameters())[-1]
-                # print('last param',last_param)
-                # print('grad',last_param.grad)
-
-                # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
-                lambda_optimizer.step()
-                scheduler_lm.step()
+                # lambda_optimizer.zero_grad()
+                # loss_lamb = compute_loss_lambda(data)
+                #
+                # loss_lamb.backward()
+                # last_param = list(ac.lambda_net.parameters())[-1]
+                # lambda_optimizer.step()
+                # scheduler_lm.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
                 new_arms_indices = ac.update_opt_in()
@@ -507,21 +459,21 @@ class AgentOracle:
         current_lamb = 0
 
         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-        o = o.reshape(-1)
+        # o = o.reshape(-1)
 
         INIT_LAMBDA_TRAINS = init_lambda_trains
 
-        # Initialize lambda to make large predictions
-        for i in range(INIT_LAMBDA_TRAINS):
-            init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
-            init_lambda_optimizer.zero_grad()
-            loss_lamb = ac.return_large_lambda_loss(o, gamma)
-
-            loss_lamb.backward()
-            last_param = list(ac.lambda_net.parameters())[-1]
-
-            # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
-            init_lambda_optimizer.step()
+        # # Initialize lambda to make large predictions
+        # for i in range(INIT_LAMBDA_TRAINS):
+        #     init_lambda_optimizer = SGD(ac.lambda_net.parameters(), lr=lm_lr)
+        #     init_lambda_optimizer.zero_grad()
+        #     loss_lamb = ac.return_large_lambda_loss(o.reshape(-1), gamma)
+        #
+        #     loss_lamb.backward()
+        #     last_param = list(ac.lambda_net.parameters())[-1]
+        #
+        #     # mpi_avg_grads(ac.lambda_net)    # average grads across MPI processes
+        #     init_lambda_optimizer.step()
 
         env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
         new_arms_indices = ac.update_opt_in()
@@ -534,12 +486,9 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'sis':
-                    T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
-                elif self.data == 'armman':
-                    T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
-                    T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-                else:
+                if self.data == 'uganda' or self.data == 'mimiciv':
+                    T_matrix = env.features
+                if self.data == 'continuous_state':
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
                     T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                     T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
@@ -548,9 +497,9 @@ class AgentOracle:
                 for arm_index in range(N):
                     if ac.opt_in[arm_index] < 0.5:
                         ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
-                lambda_net_input = np.concatenate((o, ac.feature_arr.flatten()))
-                current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
-                # current_lamb = ac.lambda_net(torch.as_tensor(o, dtype=torch.float32))
+                # lambda_net_input = np.concatenate((o.reshape(-1), ac.feature_arr.flatten()))
+                # current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
+                current_lamb = 0
                 logger.store(Lamb=current_lamb)
 
 
@@ -559,24 +508,16 @@ class AgentOracle:
             #     nature_pol = np.random.choice(nature_strats,p=nature_eq)
             #     # get transition probs from this nature policy
 
-
+            ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
+            ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
             for t in range(local_steps_per_epoch):
+                # print('removed ', ac.arm_device_removed)
+                # print('usage ', ac.arm_device_usage)
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
-                # a_nature is 1d array of length N, encoding the transition probs
-                # a_nature = nature_pol.get_nature_action(torch_o)
-                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
-
-                # moved the tp/feature update outside the for loop, since currently tp is the same at different timesteps within an epoch
-
-                a_agent, v, logp, q, probs = ac.step(torch_o, current_lamb)
-
-                # if (local_steps_per_epoch - t) < 25:
-                    # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
-
-                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
+                assert torch_o.shape[0] == env.N and torch_o.shape[1] == env.observation_dimension
+                a_agent, v, logp= ac.step(torch_o, current_lamb)
                 next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
-                
-                next_o = next_o.reshape(-1)
+                # next_o = next_o.reshape(-1)
                 
                 actual_r = r.sum()
                 cost_vec = np.zeros(env.N)
@@ -589,11 +530,8 @@ class AgentOracle:
                 ep_lamb_adjusted_ret += lamb_adjusted_r
                 ep_len += 1
 
-
-
-
                 # save and log
-                buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, q, current_lamb, logp)
+                buf.store(o, ac.feature_arr, ac.opt_in, a_agent, r, cost_vec, v, current_lamb, logp)
                 logger.store(VVals=v)
                 
                 # Update obs (critical!)
@@ -610,12 +548,12 @@ class AgentOracle:
                         pass
                     # if trajectory didn't reach terminal state, bootstrap value target
                     if timeout or epoch_ended:
-                        print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v,'probs:',probs)
+                        print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v)
                         print('opt-in', ac.opt_in)
-                        print('lambda lr', scheduler_lm.get_last_lr()[0])
-                        scheduler_lm.step()
+                        # print('lambda lr', scheduler_lm.get_last_lr()[0])
+                        # scheduler_lm.step()
                         # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
-                        _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
+                        _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32), current_lamb)
 
                         # rollout costs for an imagined 50 steps...
                         
@@ -631,7 +569,7 @@ class AgentOracle:
                     # if terminal:
                     logger.store(EpActualRet=ep_actual_ret, EpLambAdjRet=ep_lamb_adjusted_ret, EpLen=ep_len)
                     o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-                    o = o.reshape(-1)
+                    # o = o.reshape(-1)
 
 
             # Save model
@@ -659,12 +597,9 @@ class AgentOracle:
 
 
         env.update_transition_probs(np.ones(env.N))
-        if self.data == 'sis':
-            T_matrix = env.param_setting  # for SIS env, 4 parameters encode the transition dynamics information
-        elif self.data == 'armman':
-            T_matrix = env.param_setting  # for armman env, 6 parameters encode the transition dynamics information
-            T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
-        else:
+        if self.data == 'uganda' or self.data == 'mimiciv':
+            T_matrix = env.features
+        if self.data == 'coontinuous_state':
             T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
             T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
 
@@ -678,63 +613,46 @@ class AgentOracle:
         return ac
 
 
-    def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
-            steps_per_epoch=100, epochs=100, gamma=0.99):
-        breakpoint() # seems this function is not used
-        # make a new env for computing returns 
-        env = self.env_fn()
-        # important to make sure these are always the same for all instatiations of the env
-        # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
-
-        env.seed(seed)
-
-        o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-        o = o.reshape(-1)
-       
-        rewards = np.zeros((epochs, steps_per_epoch))
-        for epoch in range(epochs):
-            # print("epoch",epoch)
-
-            for t in range(steps_per_epoch):
-                torch_o = torch.as_tensor(o, dtype=torch.float32)
-                # a_nature = nature_pol.get_nature_action(torch_o)
-                # a_nature_env = nature_pol.bound_nature_actions(a_nature, state=o, reshape=True)
-
-                # currently this function is never used.
-                # # should update features here (if we use this function at some point)
-
-
-                a_agent  = agent_pol.act_test(torch_o)
-                # next_o, r, d, _ = env.step(a_agent, a_nature_env)
-                next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
-
-                next_o = next_o.reshape(-1)
-                
-                actual_r = r.sum()
-
-                ep_actual_ret += actual_r
-                # ep_lamb_adjusted_ret += lamb_adjusted_r
-                ep_len += 1
-
-
-                rewards[epoch,t] = actual_r*(gamma**t)
-
-                # Update obs (critical!)
-                o = next_o
-
-
-
-            # loop again
-            o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
-            o = o.reshape(-1)
-
-
-
-        rewards = rewards.sum(axis=1).mean()
-
-
-        return rewards
-
+    # def simulate_reward(self, agent_pol, nature_pol=[], seed=0,
+    #         steps_per_epoch=100, epochs=100, gamma=0.99):
+    #     env = self.env_fn()
+    #     # important to make sure these are always the same for all instatiations of the env
+    #     # env.sampled_parameter_ranges = self.sampled_nature_parameter_ranges
+    #
+    #     env.seed(seed)
+    #
+    #     o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
+    #     # o = o.reshape(-1)
+    #
+    #     rewards = np.zeros((epochs, steps_per_epoch))
+    #     for epoch in range(epochs):
+    #         # print("epoch",epoch)
+    #         ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
+    #         ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
+    #
+    #         for t in range(steps_per_epoch):
+    #             torch_o = torch.as_tensor(o, dtype=torch.float32)
+    #
+    #             a_agent  = agent_pol.act_test(torch_o)
+    #             next_o, r, d, _ = env.step(a_agent, ac.opt_in) # removed a_nature
+    #             # next_o = next_o.reshape(-1)
+    #             actual_r = r.sum()
+    #             ep_actual_ret += actual_r
+    #             ep_len += 1
+    #
+    #             rewards[epoch,t] = actual_r*(gamma**t)
+    #             o = next_o
+    #
+    #         o, ep_actual_ret, ep_lamb_adjusted_ret, ep_len = env.reset(), 0, 0, 0
+    #         # o = o.reshape(-1)
+    #
+    #
+    #
+    #     rewards = rewards.sum(axis=1).mean()
+    #
+    #
+    #     return rewards
+    #
 
 
 # python3 spinup/algos/pytorch/ppo/rmab_rl_lambda_ppo.py --hid 64 -l 2 --gamma 0.9 --cpu 1 --step 100 -N 4 -S 2 -A 2 -B 1 --REWARD_BOUND 2 --exp_name rmab_rl_bandit_n4s2a2b1_r2_lambda -s 0 --epochs 1000 --init_lambda_trains 1
@@ -756,7 +674,6 @@ if __name__ == '__main__':
     parser.add_argument('--reward_bound', type=int, default=1, help="Rescale rewards to this value (only some environments)")
     parser.add_argument('--save_string', type=str, default="")
     parser.add_argument('--opt_in_rate', type=float, default=1.0, help="Opt-in rate; p of sampled binomial for each arm")
-    parser.add_argument('--data_type', default='discrete', type=str, choices=['continuous','discrete'], help='Whether data is continuous or discrete')
 
     parser.add_argument('--agent_steps', type=int, default=10, help="Number of rollout steps between epochs")
     parser.add_argument('--agent_epochs', type=int, default=10, help="Number of training epochs")
@@ -779,14 +696,9 @@ if __name__ == '__main__':
     parser.add_argument('--home_dir', type=str, default='.', help="Home directory for experiments")
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
     parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
-                        choices=[   
-                                    'random',
-                                    'random_reset',
-                                    'circulant', 
-                                    'armman',
-                                    'counterexample',
-                                    'sis',
-                                    'continuous_state'
+                        choices=[   'continuous_state',
+                                    'uganda',
+                                    'mimiciv'
                                 ])
 
     parser.add_argument('--robust_keyword', default='pess', type=str, help='Method for picking some T out of the uncertain environment',
@@ -822,7 +734,6 @@ if __name__ == '__main__':
 
     opt_in_rate = args.opt_in_rate
     opt_in_rate = max(0.0, min(1.0, opt_in_rate))
-    data_type = args.data_type
     scheduler_discount = args.scheduler_discount
 
     torch.manual_seed(seed)
@@ -845,55 +756,27 @@ if __name__ == '__main__':
     agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l,
                                      input_feat_dim=args.agent_tp_transform_dims)
     agent_kwargs['gamma'] = args.gamma
+    agent_kwargs['lamb_update_freq'] = args.agent_lamb_update_freq
 
     env_fn = None
 
-    one_hot_encode = True
-    non_ohe_obs_dim = None
     state_norm = None
 
-    if args.data == 'counterexample':
-        from robust_rmab.baselines.nature_baselines_counterexample import   (
-                    RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
-                    OptimisticNaturePolicy, DetermNaturePolicy, SampledRandomNaturePolicy
-                )
-        env_fn = lambda : CounterExampleRobustEnv(N,B,seed)
-
-    if args.data == 'continuous_state':
-        env_fn = lambda : ContinuousStateExampleEnv(N,B,seed,data_type)
-
-    if args.data == 'armman':
-        from robust_rmab.baselines.nature_baselines_armman import   (
-                            RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
-                            OptimisticNaturePolicy, SampledRandomNaturePolicy
-                        )
-        env_fn = lambda: ARMMANRobustEnv(N,B,seed)
-
-    if args.data == 'sis':
-        from robust_rmab.baselines.nature_baselines_sis import   (
-                            RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
-                            OptimisticNaturePolicy, SampledRandomNaturePolicy
-                        )
-        env_fn = lambda: SISRobustEnv(N,B,args.pop_size,seed)
-        
-        # don't one hot encode this state space...
-        one_hot_encode = False
-        non_ohe_obs_dim = 1
-        state_norm = args.pop_size
-
-
-    env = env_fn()
-    #  seems we don't need the line below for DDLPO
-    # sampled_nature_parameter_ranges = env.sample_parameter_ranges()
-    # important to make sure these are always the same for all instatiations of the env
-    # env.sampled_parameter_ranges = sampled_nature_parameter_ranges
+    # if args.data == 'continuous_state':
+    #     env_fn = lambda : ContinuousStateExampleEnv(N,B,seed)
+    #
+    # if args.data == 'uganda':
+    #     env_fn = lambda : UgandaEnv(N,B,seed)
+    #
+    #
+    #
+    # env = env_fn()
 
     agent_oracle  = AgentOracle(data, N, S, A, budget, seed, reward_bound,
                              agent_kwargs=agent_kwargs, home_dir=home_dir, exp_name=exp_name,
                              robust_keyword=args.robust_keyword,
                              # sampled_nature_parameter_ranges = sampled_nature_parameter_ranges,
-                             pop_size=args.pop_size, one_hot_encode=one_hot_encode, state_norm=state_norm,
-                             non_ohe_obs_dim=non_ohe_obs_dim, opt_in_rate=opt_in_rate, data_type=data_type,
+                             pop_size=args.pop_size, opt_in_rate=opt_in_rate,
                                 scheduler_discount=scheduler_discount)
 
     nature_strategy = None

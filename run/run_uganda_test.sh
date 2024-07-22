@@ -4,7 +4,6 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
     --data ${4} \
     -N ${6} \
     -opt ${12} \
-    -dt ${13} \
     -s ${2} -ws ${2} \
     -rlmfr ${1}/data/${exp_name}/${exp_name}_s${2}/ \
     -L 10 \
@@ -12,4 +11,4 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
     --robust_keyword ${8} \
     --file_root ${1} \
     --save_string ${5} \
-    --no_hawkins ${10} \
+    --no_hawkins ${10}

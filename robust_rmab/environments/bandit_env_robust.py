@@ -965,7 +965,7 @@ class CounterExampleRobustEnv(gym.Env):
 
 
 class ContinuousStateExampleEnv(gym.Env):
-    def __init__(self, N, B, seed, tr_type):  # , REWARD_BOUND):
+    def __init__(self, N, B, seed):
 
         S = 2
         A = 2
@@ -1468,3 +1468,6 @@ class SISRobustEnv(gym.Env):
             self.random_stream.seed(seed=seed1)
 
         return [seed1]
+
+
+
