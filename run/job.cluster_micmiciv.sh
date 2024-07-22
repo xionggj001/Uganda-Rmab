@@ -12,7 +12,7 @@ set -x
 module load python/3.10.13-fasrc01
 module load intel/24.0.1-fasrc01
 module load openmpi/5.0.2-fasrc01
-source activate llm
+source activate uganda
 
 data="mimiciv"
 save_string="mimiciv"

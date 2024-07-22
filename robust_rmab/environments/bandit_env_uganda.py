@@ -498,7 +498,7 @@ class UgandaEnv(gym.Env):
         next_full_state = np.zeros((self.N, self.observation_dimension), dtype=float)
         rewards = np.zeros(self.N)
         for i in range(self.N):
-            current_arm_state = self.current_full_state[i]  # want continuous states. not rounded
+            current_arm_state = self.current_full_state[i]  # want continuous states. not rounded6
             action = int(a_agent[i])
             next_arm_state, reward = simulate_one_step(self.gmm, current_arm_state, self.min_max,
                                     intervention=action, component_index=self.arm_component[i])
