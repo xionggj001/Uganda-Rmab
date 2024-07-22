@@ -194,20 +194,25 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         candidate_arms = np.array(candidate_arms)
         process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
 
-        for arm in process_order:
-            
-            # select an action at random
-            num_valid_actions_left = len(C[C<=B-current_action_cost])
-            p = 1/(C[C<=B-current_action_cost]+1)
-            p = p/p.sum()
-            p = None
-            a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
-            current_action_cost += C[a]
-            # if the next selection takes us over budget, break
-            if current_action_cost > B:
-                break
-
-            actions[arm] = a
+        # continue from last step's action, if we can still give this person the device
+        to_remove_device = 1
+        for arm in candidate_arms:
+            if 1 <= rl_info['model'].arm_device_usage[arm] < rl_info['model'].max_device_usage:
+                actions[arm] = 1
+                to_remove_device = 0
+        if to_remove_device == 1:
+            for arm in process_order:
+                # select an action at random
+                num_valid_actions_left = len(C[C<=B-current_action_cost])
+                p = 1/(C[C<=B-current_action_cost]+1)
+                p = p/p.sum()
+                p = None
+                a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
+                current_action_cost += C[a]
+                # if the next selection takes us over budget, break
+                if current_action_cost > B:
+                    break
+                actions[arm] = a
 
         # update self.arm_device_removed
         for i in range(N):

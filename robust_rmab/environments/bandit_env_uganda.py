@@ -16,9 +16,10 @@ import os
 
 #Hyperparameters for 3 settings
 setting="uganda"
-min_entries=1
-time_size=20
-vital_signs = ['COVERED_SKIN_TEMPERATURE', 'PULSE_RATE',  'RESPIRATORY_RATE','SPO2']
+min_entries=10
+time_size=60
+# vital_signs = ['COVERED_SKIN_TEMPERATURE', 'PULSE_RATE',  'RESPIRATORY_RATE','SPO2']
+vital_signs = ['COVERED_SKIN_TEMPERATURE', 'PULSE_RATE',  'RESPIRATORY_RATE']
 num_comp=5
 sample_size=-1
 num_timesteps=1
@@ -450,9 +451,10 @@ class UgandaEnv(gym.Env):
     def __init__(self, N, B, seed):
         self.N = N
         self.gmm, self.min_max = create_model()
-        self.features = np.zeros((self.N, 8))
+        self.num_vital_signs = len(vital_signs)
+        self.features = np.zeros((self.N, 2 * self.num_vital_signs))
         self.arm_component = np.zeros(self.N, dtype=np.int8)
-        S = 4
+        S = self.num_vital_signs
         A = 2
         # initialize arm_component
         for i in range(self.N):
@@ -462,7 +464,7 @@ class UgandaEnv(gym.Env):
 
         self.observation_space = np.arange(S)
         self.action_space = np.arange(A)
-        self.observation_dimension = 4 # 4 vital signs
+        self.observation_dimension = self.num_vital_signs
         self.action_dimension = 1
         self.action_dim_nature = N
         self.S = S
