@@ -225,6 +225,7 @@ class MLPActorCriticRMAB(nn.Module):
 
 
     def step(self, obs, lamb):
+        # modified for Uganda data and Mimic data. Only supports binary actions
         with torch.no_grad():
             obs = obs/self.state_norm
             a_list = np.zeros(self.N,dtype=int)
@@ -247,6 +248,8 @@ class MLPActorCriticRMAB(nn.Module):
             a1_list = pi_list[:,ACTION]
             # these arms can no longer use the device. set their probs of being selected to be zero. so they will not get selected
             a1_list[self.arm_device_removed > 0.5] *= 0
+            a1_list[self.opt_in < 0.5] *= 0 # opt-out arms. set their prob of action 1 to be zero
+
             sorted_inds = np.argsort(a1_list)[::-1]
             i = 0
             budget_spent = 0

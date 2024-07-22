@@ -13,6 +13,7 @@ from robust_rmab.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statisti
 from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, RandomBanditResetEnv, CirculantDynamicsEnv, ARMMANEnv
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
 from robust_rmab.environments.bandit_env_uganda import UgandaEnv
+from robust_rmab.environments.bandit_env_mimiciv import MimicivEnv
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 
@@ -182,6 +183,9 @@ class AgentOracle:
         if data == 'uganda':
             self.env_fn = lambda: UgandaEnv(N, B, seed)
 
+        if data == 'mimiciv':
+            self.env_fn = lambda: MimicivEnv(N, B, seed)
+
         self.state_norm = 1
         self.actor_critic=core.MLPActorCriticRMAB
         self.agent_kwargs=agent_kwargs
@@ -218,7 +222,7 @@ class AgentOracle:
             start_entropy_coeff=0.0, end_entropy_coeff=0.0,
             max_ep_len=1000,
             target_kl=0.01, logger_kwargs=dict(), save_freq=10,
-            lamb_update_freq=10,
+            lamb_update_freq=4,
             init_lambda_trains=0,
             final_train_lambdas=0,
             tp_transform=None):
@@ -435,7 +439,8 @@ class AgentOracle:
 
 
             # Lambda optimization
-            if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
+            if epoch%lamb_update_freq == 0 and epoch > 0:
+            # if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
 
                 # lambda_optimizer.zero_grad()
                 # loss_lamb = compute_loss_lambda(data)
@@ -481,7 +486,7 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'uganda':
+                if self.data == 'uganda' or self.data == 'mimiciv':
                     T_matrix = env.features
                 if self.data == 'continuous_state':
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
@@ -592,7 +597,7 @@ class AgentOracle:
 
 
         env.update_transition_probs(np.ones(env.N))
-        if self.data == 'uganda':
+        if self.data == 'uganda' or self.data == 'mimiciv':
             T_matrix = env.features
         if self.data == 'coontinuous_state':
             T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
@@ -692,7 +697,8 @@ if __name__ == '__main__':
     parser.add_argument('--cannon', type=int, default=0, help="Flag used for running experiments on batched slurm-based HPC resources. Leave at 0 for small experiments.")
     parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
                         choices=[   'continuous_state',
-                                    'uganda'
+                                    'uganda',
+                                    'mimiciv'
                                 ])
 
     parser.add_argument('--robust_keyword', default='pess', type=str, help='Method for picking some T out of the uncertain environment',
@@ -750,6 +756,7 @@ if __name__ == '__main__':
     agent_kwargs['ac_kwargs'] = dict(hidden_sizes=[args.hid]*args.l,
                                      input_feat_dim=args.agent_tp_transform_dims)
     agent_kwargs['gamma'] = args.gamma
+    agent_kwargs['lamb_update_freq'] = args.agent_lamb_update_freq
 
     env_fn = None
 
