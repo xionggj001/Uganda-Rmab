@@ -681,8 +681,8 @@ class MimicivEnv(gym.Env):
             # next_arm_state = np.minimum(1, np.maximum(0, next_arm_state))
             next_full_state_raw[i] = next_arm_state_raw
             next_full_state[i] = np.append(next_full_state_raw[i][0], next_full_state_raw[i][1])
-            if opt_in[i] < 0.5:
-                next_full_state[i] *= 0  # opt-out arms have dummy state
+            # if opt_in[i] < 0.5:
+            #     next_full_state[i] *= 0  # opt-out arms have dummy state
             rewards[i] = reward
 
         if mode == "eval":

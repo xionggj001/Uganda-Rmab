@@ -401,7 +401,7 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             rl_info['model'] = model
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
-            env.env.update_transition_probs(np.ones(env.env.N), mode='eval')
+            env.env.update_transition_probs(np.ones(env.env.N), mode='eval') # resample arms for every trial
             if data_dict['dataset_name'] == 'uganda' or data_dict['dataset_name'] == 'mimiciv':
                 T_matrix = env.features
             else:
@@ -410,9 +410,6 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             model.transition_param_arr = T_matrix
             model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim, in_dim=model.feature_input_dim)
             model.opt_in = env.params
-            for arm_index in range(env.env.N):
-                    if model.opt_in[arm_index] < 0.5:
-                        model.feature_arr[arm_index] *= 0 # to make dummy arms more obvious to the lambda net
             rl_info['model'] =  model
 
     print('Running simulation w/ policy: %s'%policy_option)
@@ -469,7 +466,18 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
     rl_info['model'].arm_device_removed = np.zeros(rl_info['model'].N) # reset tracker (whether we remove the device from an arm)
     rl_info['model'].arm_device_usage = np.zeros(rl_info['model'].N) # reset tracker (how many steps has am arm used the device)
 
+    rl_info['model'].arm_device_removed = np.zeros(N)  # reset tracker (whether we remove the device from an arm)
+    rl_info['model'].arm_device_usage = np.zeros(N)  # reset tracker (how many steps has am arm used the device)
+    rl_info['model'].opt_in = np.ones(N)  # reset opt-in status
+    rl_info['model'].opt_in_steps = np.zeros(N)  # reset tracker (the amount of steps each opt-in arm stays in the system)
+    rl_info['model'].opt_in[int(env.B):] *= 0  # block all arms except for first B arms
     for t in range(1,L):
+        if t % 5 == 0 and t > 1:
+            release_index = int(env.B + 2 * (t // 5) - 1)
+            rl_info['model'].opt_in[release_index:release_index + 2] = 1  # release a blocked arm
+        rl_info['model'].opt_in_steps[rl_info['model'].opt_in > 0.5] += 1  # update the amount of steps each opt-in arm stays in the system
+        rl_info['model'].opt_in[rl_info['model'].opt_in_steps >= 50] = 0  # block arms that are in the system for 50 steps or more
+
         print("Round %s"%t)
 
         actions=getActions(N, T, R, C, B, t, policy_option, env.action_space,
@@ -674,7 +682,9 @@ if __name__=="__main__":
 
 
 
-    N=args.num_arms
+    # N=args.num_arms
+    N = int(args.opt_in_rate * (args.simulation_length / 5) + args.budget) # every 5 steps, we have opt_in_rate many arms opt-in
+    print('N', N)
     L=args.simulation_length
     savestring=args.save_string
     N_TRIALS=args.num_trials
@@ -760,11 +770,12 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
@@ -780,11 +791,12 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
@@ -801,11 +813,12 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))

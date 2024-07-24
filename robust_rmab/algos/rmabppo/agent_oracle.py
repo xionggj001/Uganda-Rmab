@@ -310,18 +310,22 @@ class AgentOracle:
             # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             obs = obs/self.state_norm
             full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+            # full_obs = obs
 
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
 
             # Policy loss
             for i in range(env.N):
+                if sum(act[:,i]) == 0:
+                    continue # all actions are zeros would cause an error in ac.pi_list computation
                 # do not backprop when this arm opts-out
-                if opt_in[-1,i] == 0:
-                    continue
+                # if opt_in[-1,i] == 0:
+                #     continue
                 pi_optimizer.zero_grad()
 
-                pi, logp = ac.pi_list(full_obs[:, i], act[:, i]) # this line has errors
+                pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
+                # pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
                 ent = pi.entropy().mean()
                 ratio = torch.exp(logp - logp_old[:, i])
                 clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[:, i]
@@ -356,36 +360,37 @@ class AgentOracle:
 
             obs = obs/self.state_norm
             full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+            # full_obs = obs
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
                 # do not backprop when this arm opts-out
-                if opt_in[-1,i] == 0:
-                    continue
+                # if opt_in[-1,i] == 0:
+                #     continue
                 vf_optimizer.zero_grad()
                 loss_list[i] = ((ac.v_list(full_obs[:, i]) - ret[:, i])**2).mean()
                 loss_list[i].backward()
                 vf_optimizer.step()
             return loss_list
 
-        def compute_loss_q(data):
-            # currently not used
-            print('compute_loss_q. seems this function is unused')
-
-            qs, oha, lambdas, transition_probs  = \
-                data['qs'], data['oha'], data['lambdas'], data['transition_probs']
-            lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
-            full_obs = None
-            # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
-
-            obs = obs/self.state_norm
-            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
-
-            loss_list = np.zeros(env.N,dtype=object)
-            for i in range(env.N):
-                x = torch.as_tensor(np.concatenate([full_obs[:, i], oha[:, i]], axis=1), dtype=torch.float32)
-                loss_list[i] = ((ac.q_list(x) - qs[:, i])**2).mean()
-            return loss_list
+        # def compute_loss_q(data):
+        #     # currently not used
+        #     print('compute_loss_q. seems this function is unused')
+        #
+        #     qs, oha, lambdas, transition_probs  = \
+        #         data['qs'], data['oha'], data['lambdas'], data['transition_probs']
+        #     lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
+        #     full_obs = None
+        #     # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
+        #
+        #     obs = obs/self.state_norm
+        #     full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
+        #
+        #     loss_list = np.zeros(env.N,dtype=object)
+        #     for i in range(env.N):
+        #         x = torch.as_tensor(np.concatenate([full_obs[:, i], oha[:, i]], axis=1), dtype=torch.float32)
+        #         loss_list[i] = ((ac.q_list(x) - qs[:, i])**2).mean()
+        #     return loss_list
 
         def compute_loss_lambda(data):
 
@@ -439,7 +444,7 @@ class AgentOracle:
 
 
             # Lambda optimization
-            if epoch%lamb_update_freq == 0 and epoch > 0:
+            # if epoch%lamb_update_freq == 0 and epoch > 0:
             # if epoch%lamb_update_freq == 0 and epoch > 0 and (epochs - epoch) > FINAL_TRAIN_LAMBDAS:
 
                 # lambda_optimizer.zero_grad()
@@ -451,8 +456,9 @@ class AgentOracle:
                 # scheduler_lm.step()
 
                 # update the opt-in decisions, which will stay the same until the next time we update lambda net
-                new_arms_indices = ac.update_opt_in()
-                env.update_transition_probs(new_arms_indices)
+                # new_arms_indices = ac.update_opt_in()
+                # env.update_transition_probs(new_arms_indices)
+
 
         # Prepare for interaction with environment
         start_time = time.time()
@@ -476,12 +482,13 @@ class AgentOracle:
         #     init_lambda_optimizer.step()
 
         env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
-        new_arms_indices = ac.update_opt_in()
-        env.update_transition_probs(new_arms_indices)
+        # new_arms_indices = ac.update_opt_in()
+        # env.update_transition_probs(new_arms_indices)
 
         # Main loop: collect experience in env and update/log each epoch
         head_entropy_coeff_schedule = np.linspace(start_entropy_coeff, end_entropy_coeff, epochs)
         for epoch in range(epochs):
+            env.update_transition_probs(np.ones(env.N)) # resample arms every epoch
             # print("start state",o)
             current_lamb = 0
             with torch.no_grad():
@@ -494,13 +501,9 @@ class AgentOracle:
                     T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 # featurization
                 ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim=feature_input_dim)
-                for arm_index in range(N):
-                    if ac.opt_in[arm_index] < 0.5:
-                        ac.feature_arr[arm_index] *= 0  # to make dummy arms more obvious to the lambda net
-                # lambda_net_input = np.concatenate((o.reshape(-1), ac.feature_arr.flatten()))
-                # current_lamb = ac.lambda_net(torch.as_tensor(lambda_net_input, dtype=torch.float32))
-                current_lamb = 0
-                logger.store(Lamb=current_lamb)
+
+
+            logger.store(Lamb=current_lamb)
 
 
             # # Resample nature policy every time we update lambda
@@ -510,9 +513,22 @@ class AgentOracle:
 
             ac.arm_device_removed = np.zeros(N) # reset tracker (whether we remove the device from an arm)
             ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
+            ac.opt_in = np.ones(N) # reset opt-in status
+            ac.opt_in_steps = np.zeros(N) # reset tracker (the amount of steps each opt-in arm stays in the system)
+
+            ac.opt_in[int(env.B):] *= 0 # block all arms except for first B arms
             for t in range(local_steps_per_epoch):
-                # print('removed ', ac.arm_device_removed)
-                # print('usage ', ac.arm_device_usage)
+                if t % 5 == 0 and t > 1:
+                    release_index = int(env.B + 2 * (t // 5) - 1)
+                    ac.opt_in[release_index:release_index + 2] = 1 # release a blocked arm
+                ac.opt_in_steps[ac.opt_in > 0.5] += 1 # update the amount of steps each opt-in arm stays in the system
+                ac.opt_in[ac.opt_in_steps >= 50] = 0 # block arms that are in the system for 50 steps or more
+                # print('step', t)
+                # print('opt-in', ac.opt_in)
+                # print('opt-in-steps', ac.opt_in_steps)
+                # print('device removed', ac.arm_device_removed)
+                # print('step', t, 'usage', ac.arm_device_usage)
+
                 torch_o = torch.as_tensor(o, dtype=torch.float32)
                 assert torch_o.shape[0] == env.N and torch_o.shape[1] == env.observation_dimension
                 a_agent, v, logp= ac.step(torch_o, current_lamb)
@@ -548,8 +564,8 @@ class AgentOracle:
                         pass
                     # if trajectory didn't reach terminal state, bootstrap value target
                     if timeout or epoch_ended:
-                        print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v)
-                        print('opt-in', ac.opt_in)
+                        # print('lam',current_lamb,'obs:',o,'a',a_agent,'v:',v)
+
                         # print('lambda lr', scheduler_lm.get_last_lr()[0])
                         # scheduler_lm.step()
                         # print('# arms pulled', sum(a_agent), '# opt-out arms pulled', sum(a_agent * (1 - ac.opt_in)))
@@ -596,18 +612,18 @@ class AgentOracle:
             logger.dump_tabular()
 
 
-        env.update_transition_probs(np.ones(env.N))
-        if self.data == 'uganda' or self.data == 'mimiciv':
-            T_matrix = env.features
-        if self.data == 'coontinuous_state':
-            T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
-            T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
-
-        ac.transition_param_arr = T_matrix
+        # env.update_transition_probs(np.ones(env.N))
+        # if self.data == 'uganda' or self.data == 'mimiciv':
+        #     T_matrix = env.features
+        # if self.data == 'coontinuous_state':
+        #     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
+        #     T_matrix = np.reshape(T_matrix[:, :, :, 1:], (T_matrix[:, :, :, 1:].shape[0], np.prod(T_matrix[:, :, :, 1:].shape[1:])))
+        #
+        # ac.transition_param_arr = T_matrix
         ac.tp_transform = tp_transform
         ac.out_dim = ac_kwargs["input_feat_dim"]
         ac.feature_input_dim = feature_input_dim
-        ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim = feature_input_dim)
+        # ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim = feature_input_dim)
         print("saving")
         logger.save_state({'env': env}, None)
         return ac
@@ -720,7 +736,9 @@ if __name__ == '__main__':
     # data_dir = os.path.join(args.home_dir, 'data')
     # logger_kwargs = setup_logger_kwargs(exp_name, args.seed, data_dir=data_dir)
 
-    N = args.N
+    # N = args.N
+    N = int(args.opt_in_rate * (args.agent_steps / 5) + args.B) # every 5 steps, we have opt_in_rate many arms opt-in
+    print('N', N)
     S = args.S
     A = args.A
     B = args.B
