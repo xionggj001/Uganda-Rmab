@@ -317,6 +317,9 @@ class AgentOracle:
 
             # Policy loss
             for i in range(env.N):
+                # if i == 42:
+                #     breakpoint()
+                # print('i', i)
                 if sum(act[:,i]) == 0:
                     continue # all actions are zeros would cause an error in ac.pi_list computation
                 # do not backprop when this arm opts-out
@@ -519,7 +522,7 @@ class AgentOracle:
             ac.opt_in[int(env.B):] *= 0 # block all arms except for first B arms
             for t in range(local_steps_per_epoch):
                 if t % 5 == 0 and t > 1:
-                    release_index = int(env.B + 2 * (t // 5) - 1)
+                    release_index = int(env.B + 2 * (t // 5) - 2)
                     ac.opt_in[release_index:release_index + 2] = 1 # release a blocked arm
                 ac.opt_in_steps[ac.opt_in > 0.5] += 1 # update the amount of steps each opt-in arm stays in the system
                 ac.opt_in[ac.opt_in_steps >= 50] = 0 # block arms that are in the system for 50 steps or more

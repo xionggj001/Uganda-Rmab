@@ -17,8 +17,8 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --agent_pi_lr 2e-3 \
     --agent_vf_lr 2e-3 \
     --agent_lm_lr 2e-3 \
-    --agent_train_pi_iters 20 \
-    --agent_train_vf_iters 20 \
+    --agent_train_pi_iters 10 \
+    --agent_train_vf_iters 10 \
     --agent_lamb_update_freq 4 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
@@ -33,8 +33,8 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
     -opt ${12} \
     -s ${2} -ws ${2} \
     -rlmfr ${1}/data/${exp_name}/${exp_name}_s${2}/ \
-    -L 50 \
-    -n 50 \
+    -L 100 \
+    -n 10 \
     --robust_keyword ${8} \
     --file_root ${1} \
     --save_string ${5} \

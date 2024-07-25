@@ -242,19 +242,19 @@ class MLPActorCriticRMAB(nn.Module):
 
             for i in range(self.N):
                 if arms_eligible[i] > 0.5:
-                    transition_prob = self.feature_arr[i]
-                    # need to define transition prob for each arm. maybe hardcode for each arm for now
-                    full_obs = np.concatenate([obs[i],[lamb],transition_prob])
-                    # full_obs = obs[i]
-                    full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
-                    pi_list[i] = self.pi_list._distribution(full_obs).probs.detach().numpy()
+                    if self.opt_in_steps[i] <= 3:
+                        pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
+                    else:
+                        full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
+                        # full_obs = obs[i]
+                        full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
+                        pi_list[i] = self.pi_list._distribution(full_obs).probs.detach().numpy()
 
-                    v = self.v_list(full_obs)
-                    v_list[i] = v.numpy()
+                        v = self.v_list(full_obs)
+                        v_list[i] = v.numpy()
                 else:
                     pi_list[i, 1:] -= 1
-                if self.opt_in_steps[i] == 1:
-                    pi_list[i,1:] = 100 # we must give newly opt-in arms the device
+
             # play the actions with the largest probs.
             # need to update and take into account opt-in
             ACTION  = 1
@@ -282,17 +282,18 @@ class MLPActorCriticRMAB(nn.Module):
                     # each arm can only use device for a maximum number of steps
                     self.arm_device_removed[i] = 1
 
+
             # compute loss prob of actions
             for i in range(self.N):
-                full_obs = np.concatenate([obs[i],[lamb],transition_prob])
+                full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
                 # full_obs = obs[i]
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
                 logp_a = self.pi_list._log_prob_from_distribution(pi, torch.tensor(a_list[i], dtype=torch.int8))
                 # logp_a is log of probability of choosing this action.
                 # if a=1, then logp_a=log(a1_probs[i]); else, logp_a=log(1-a1_probs[i])
-                if self.opt_in[i] < 0.5:
-                    logp_a = torch.tensor(np.log(0.1)) # log(0) is undefined, so we use log(0.1)
+                # if self.opt_in[i] < 0.5:
+                #     logp_a = torch.tensor(np.log(0.1)) # log(0) is undefined, so we use log(0.1)
                 logp_a_list[i] = logp_a.numpy()
 
         return a_list, v_list, logp_a_list
@@ -403,19 +404,19 @@ class MLPActorCriticRMAB(nn.Module):
 
             for i in range(self.N):
                 if arms_eligible[i] > 0.5:
-                    transition_prob = self.feature_arr[i]
-                    full_obs = None
-                    full_obs = np.concatenate([obs[i],[lamb],transition_prob])
-                    # full_obs = obs[i]
-                    # print(full_obs)
-                    full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
+                    if self.opt_in_steps[i] <= 3:
+                        pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
+                    else:
+                        full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
+                        # full_obs = obs[i]
+                        # print(full_obs)
+                        full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
-                    pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
-                    pi_list[i] = pi
+                        pi = self.pi_list._distribution(full_obs).probs.detach().numpy()
+                        pi_list[i] = pi
                 else:
                     pi_list[i, 1:] -= 1
-                if self.opt_in_steps[i] == 1:
-                    pi_list[i,1:] = 100 # we must give newly opt-in arms the device
+
 
             row_maxes = pi_list.max(axis=1)
             row_order = np.argsort(row_maxes)[::-1]
@@ -435,8 +436,8 @@ class MLPActorCriticRMAB(nn.Module):
                 while i < self.N:
                     arm = row_order[i]
                     arm_a = pi_arg_maxes[row_order[i]][-1]
-                    if self.opt_in[i] < 0.5:
-                        arm_a = 0 # 'no pull' action for opt-out arms.
+                    # if self.opt_in[i] < 0.5:
+                    #     arm_a = 0 # 'no pull' action for opt-out arms.
                     a_cost = self.C[arm_a]
 
                     if budget_spent + a_cost - self.C[actions[arm]] > self.B:

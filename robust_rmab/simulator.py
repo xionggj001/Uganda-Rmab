@@ -463,8 +463,8 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
     print("Policy:", policy_option)
 
     ep_ret = 0
-    rl_info['model'].arm_device_removed = np.zeros(rl_info['model'].N) # reset tracker (whether we remove the device from an arm)
-    rl_info['model'].arm_device_usage = np.zeros(rl_info['model'].N) # reset tracker (how many steps has am arm used the device)
+    # rl_info['model'].arm_device_removed = np.zeros(rl_info['model'].N) # reset tracker (whether we remove the device from an arm)
+    # rl_info['model'].arm_device_usage = np.zeros(rl_info['model'].N) # reset tracker (how many steps has am arm used the device)
 
     rl_info['model'].arm_device_removed = np.zeros(N)  # reset tracker (whether we remove the device from an arm)
     rl_info['model'].arm_device_usage = np.zeros(N)  # reset tracker (how many steps has am arm used the device)
@@ -473,18 +473,17 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
     rl_info['model'].opt_in[int(env.B):] *= 0  # block all arms except for first B arms
     for t in range(1,L):
         if t % 5 == 0 and t > 1:
-            release_index = int(env.B + 2 * (t // 5) - 1)
+            release_index = int(env.B + 2 * (t // 5) - 2)
             rl_info['model'].opt_in[release_index:release_index + 2] = 1  # release a blocked arm
         rl_info['model'].opt_in_steps[rl_info['model'].opt_in > 0.5] += 1  # update the amount of steps each opt-in arm stays in the system
         rl_info['model'].opt_in[rl_info['model'].opt_in_steps >= 50] = 0  # block arms that are in the system for 50 steps or more
-
-        print("Round %s"%t)
-
+        # print("Round %s"%t)
         actions=getActions(N, T, R, C, B, t, policy_option, env.action_space,
                             rl_info=rl_info, current_state=state_log[:,t-1],
                             data_dict=data_dict, env=env,
                             valid_action_combinations=valid_action_combinations)
         actions = actions.reshape(N,-1)
+        # print('policy option', policy_option, 'round ', t, 'complete')
 
         action_log[:, t-1]=actions
         EPS = 1e-6
