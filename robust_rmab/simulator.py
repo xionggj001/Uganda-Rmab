@@ -8,6 +8,7 @@ from robust_rmab.environments.bandit_env import SISBanditEnv, RandomBanditEnv, R
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT, ContinuousStateExampleEnv
 from robust_rmab.environments.bandit_env_uganda import UgandaEnv
 from robust_rmab.environments.bandit_env_mimiciv import MimicivEnv
+from robust_rmab.environments.bandit_env_mimiciii import MimiciiiEnv
 
 import os
 import os.path as osp
@@ -400,7 +401,7 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
             env.env.update_transition_probs(np.ones(env.env.N), mode='eval') # resample arms for every trial
-            if data_dict['dataset_name'] == 'uganda' or data_dict['dataset_name'] == 'mimiciv':
+            if data_dict['dataset_name'] in ['uganda', 'mimiciv', 'mimiciii']:
                 T_matrix = env.features
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
@@ -527,6 +528,7 @@ if __name__=="__main__":
     parser.add_argument('-d', '--data', default='real', type=str,help='Method for generating transition probabilities',
                             choices=[   'uganda',
                                         'mimiciv',
+                                        'mimiciii',
                                         'continuous_state'
                                     ])
 
@@ -821,6 +823,27 @@ if __name__=="__main__":
         env.env.update_transition_probs(np.ones(env.env.N))
         # for now, in testing, assume all arms are opt-in.
 
+    if args.data == 'mimiciii':
+        env = MimiciiiEnv(N, B, seedbase)
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+
+        T = 0
+        R = 0
+        C = env.C
+
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
+
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
+        env.env.update_transition_probs(np.ones(env.env.N))
+        # for now, in testing, assume all arms are opt-in.
+
     if args.data == 'sis':
         from robust_rmab.baselines.nature_baselines_sis import   (
                             RandomNaturePolicy, PessimisticNaturePolicy, MiddleNaturePolicy, 
@@ -899,8 +922,6 @@ if __name__=="__main__":
         env.random_stream.rand()
         
     for i in range(N_TRIALS):
-        # in each trial, we use freshly sampled unseen arms
-        # env.env.update_transition_probs(np.ones(env.env.N))
 
         if valid_action_combinations is None:
             combinatorial_policies = set(policies) & set([4, 101])

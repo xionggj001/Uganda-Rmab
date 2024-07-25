@@ -14,6 +14,7 @@ from robust_rmab.environments.bandit_env import RandomBanditEnv, Eng1BanditEnv, 
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, ARMMANRobustEnv, CounterExampleRobustEnv, SISRobustEnv, ContinuousStateExampleEnv
 from robust_rmab.environments.bandit_env_uganda import UgandaEnv
 from robust_rmab.environments.bandit_env_mimiciv import MimicivEnv
+from robust_rmab.environments.bandit_env_mimiciii import MimiciiiEnv
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 
@@ -185,6 +186,9 @@ class AgentOracle:
 
         if data == 'mimiciv':
             self.env_fn = lambda: MimicivEnv(N, B, seed)
+
+        if data == 'mimiciii':
+            self.env_fn = lambda: MimiciiiEnv(N, B, seed)
 
         self.state_norm = 1
         self.actor_critic=core.MLPActorCriticRMAB
@@ -501,7 +505,7 @@ class AgentOracle:
             current_lamb = 0
             with torch.no_grad():
                 # this is the version where we only predict lambda once at the top of the epoch...
-                if self.data == 'uganda' or self.data == 'mimiciv':
+                if self.data == 'uganda' or self.data == 'mimiciv' or self.data == 'mimiciii':
                     T_matrix = env.features
                 if self.data == 'continuous_state':
                     T_matrix = env.model_input_T if hasattr(env, 'model_input_T') else env.T
@@ -722,7 +726,8 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--data', default='continuous_state', type=str, help='Environment selection',
                         choices=[   'continuous_state',
                                     'uganda',
-                                    'mimiciv'
+                                    'mimiciv',
+                                    'mimiciii'
                                 ])
 
     parser.add_argument('--robust_keyword', default='pess', type=str, help='Method for picking some T out of the uncertain environment',
