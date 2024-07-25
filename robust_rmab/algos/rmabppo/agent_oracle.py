@@ -317,29 +317,30 @@ class AgentOracle:
 
             # Policy loss
             for i in range(env.N):
-                # if i == 42:
-                #     breakpoint()
-                # print('i', i)
-                if sum(act[:,i]) == 0:
-                    continue # all actions are zeros would cause an error in ac.pi_list computation
-                # do not backprop when this arm opts-out
-                # if opt_in[-1,i] == 0:
-                #     continue
+                # if sum(act[:,i]) == 0:
+                #     continue # all actions are zeros would cause an error in ac.pi_list computation
+                # calculate when this arm was released
+                release_step = 0
+                if i >= env.B:
+                    release_step = int((1 + (i - env.B) // self.opt_in_rate) * 5)
+                opt_out_step = min(local_steps_per_epoch, 50 + release_step)
+                if opt_out_step - release_step <= 5:
+                    continue # these arms are newly opt-in. don't have useful information from them
                 pi_optimizer.zero_grad()
 
-                pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
+                pi, logp = ac.pi_list(full_obs[release_step:opt_out_step, i], act[release_step:opt_out_step, i])
                 # pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
                 ent = pi.entropy().mean()
-                ratio = torch.exp(logp - logp_old[:, i])
-                clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[:, i]
-                loss_pi = -(torch.min(ratio * adv[:, i], clip_adv)).mean()
+                ratio = torch.exp(logp - logp_old[release_step:opt_out_step, i])
+                clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[release_step:opt_out_step, i]
+                loss_pi = -(torch.min(ratio * adv[release_step:opt_out_step, i], clip_adv)).mean()
                 
                 # subtract entropy term since we want to encourage it 
                 loss_pi -= entropy_coeff*ent
                 loss_pi_list[i] = loss_pi
 
                 # Useful extra info
-                approx_kl = (logp_old[:, i] - logp).mean().item()
+                approx_kl = (logp_old[release_step:opt_out_step, i] - logp).mean().item()
                 
                 clipped = ratio.gt(1+clip_ratio) | ratio.lt(1-clip_ratio)
                 clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
@@ -367,11 +368,15 @@ class AgentOracle:
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
-                # do not backprop when this arm opts-out
-                # if opt_in[-1,i] == 0:
-                #     continue
+                release_step = 0
+                if i >= env.B:
+                    release_step = int((1 + (i - env.B) // self.opt_in_rate) * 5)
+                opt_out_step = min(local_steps_per_epoch, 50 + release_step)
+                if opt_out_step - release_step <= 5:
+                    continue # these arms are newly opt-in. don't have useful information from them
+
                 vf_optimizer.zero_grad()
-                loss_list[i] = ((ac.v_list(full_obs[:, i]) - ret[:, i])**2).mean()
+                loss_list[i] = ((ac.v_list(full_obs[release_step:opt_out_step, i]) - ret[release_step:opt_out_step, i])**2).mean()
                 loss_list[i].backward()
                 vf_optimizer.step()
             return loss_list
@@ -522,8 +527,8 @@ class AgentOracle:
             ac.opt_in[int(env.B):] *= 0 # block all arms except for first B arms
             for t in range(local_steps_per_epoch):
                 if t % 5 == 0 and t > 1:
-                    release_index = int(env.B + 2 * (t // 5) - 2)
-                    ac.opt_in[release_index:release_index + 2] = 1 # release a blocked arm
+                    release_index = int(env.B + self.opt_in_rate * ((t // 5) - 1))
+                    ac.opt_in[release_index:release_index + int(self.opt_in_rate)] = 1 # release a blocked arm
                 ac.opt_in_steps[ac.opt_in > 0.5] += 1 # update the amount of steps each opt-in arm stays in the system
                 ac.opt_in[ac.opt_in_steps >= 50] = 0 # block arms that are in the system for 50 steps or more
                 # print('step', t)
@@ -754,7 +759,7 @@ if __name__ == '__main__':
     gamma = args.gamma
 
     opt_in_rate = args.opt_in_rate
-    opt_in_rate = max(0.0, min(1.0, opt_in_rate))
+    assert opt_in_rate <= B # else the constraint that we must give newly opt-in arm device cannot be satisfied
     scheduler_discount = args.scheduler_discount
 
     torch.manual_seed(seed)

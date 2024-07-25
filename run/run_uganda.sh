@@ -17,8 +17,8 @@ python3 ${1}/agent_oracle.py --hid 16 -l 2 --gamma 0.9 --cpu 1 \
     --agent_pi_lr 2e-3 \
     --agent_vf_lr 2e-3 \
     --agent_lm_lr 2e-3 \
-    --agent_train_pi_iters 10 \
-    --agent_train_vf_iters 10 \
+    --agent_train_pi_iters 20 \
+    --agent_train_vf_iters 20 \
     --agent_lamb_update_freq 4 \
     --robust_keyword ${8} \
     --agent_tp_transform ${11} \
