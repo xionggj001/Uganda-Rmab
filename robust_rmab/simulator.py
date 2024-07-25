@@ -190,18 +190,16 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         candidate_arms = []
         for i in range(N):
             if rl_info['model'].arm_device_removed[i] < 0.5 and rl_info['model'].opt_in[i] > 0.5:
-                candidate_arms.append(i)
-        candidate_arms = np.array(candidate_arms)
-        process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
+                if rl_info['model'].opt_in_steps[i] <= 3:
+                    actions[i] = 1 # we must give newly opt-in arms the device
+                    current_action_cost += 1 # assume binary action here
+                else:
+                    candidate_arms.append(i)
+        if current_action_cost < B: # only proceed if there is still unused budget
+            candidate_arms = np.array(candidate_arms)
+            process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
 
-        # continue from last step's action, if we can still give this person the device
-        to_remove_device = 1
-        for arm in candidate_arms:
-            if 1 <= rl_info['model'].arm_device_usage[arm] < rl_info['model'].max_device_usage:
-                actions[arm] = 1
-                to_remove_device = 0
-        if to_remove_device == 1:
-            for arm in process_order:
+            for arm in process_order: # we only process eligible arms
                 # select an action at random
                 num_valid_actions_left = len(C[C<=B-current_action_cost])
                 p = 1/(C[C<=B-current_action_cost]+1)
@@ -216,16 +214,16 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
 
         # update self.arm_device_removed
         for i in range(N):
-            if rl_info['model'].arm_device_usage[i] > 0 and actions[i] == 0:
-                rl_info['model'].arm_device_removed[i] = 1
-                # this arm used the device, and later we remove the device from this arm.
-                # thus, according to given constraints, from now on, we can no longer give the device to this arm.
-            if actions[i] == 1:
+            if actions[i] == 0:
+                if rl_info['model'].arm_device_usage[i] > 0 or rl_info['model'].opt_in[i] == 1:
+                    rl_info['model'].arm_device_removed[i] = 1
+                    # this arm used the device, and later we remove the device from this arm.
+                    # thus, according to given constraints, from now on, we can no longer give the device to this arm.
+            else: # actions[i] == 1:
                 rl_info['model'].arm_device_usage[i] += 1
                 if rl_info['model'].arm_device_usage[i] >= rl_info['model'].max_device_usage:
                     # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
                     rl_info['model'].arm_device_removed[i] = 1
-
 
         return actions
 
