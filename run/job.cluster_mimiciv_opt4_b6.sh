@@ -16,8 +16,8 @@ source activate uganda
 
 data="mimiciv"
 save_string="mimiciv"
-N=86
-B=10.0
+N=82
+B=6.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=50 
 seed=0

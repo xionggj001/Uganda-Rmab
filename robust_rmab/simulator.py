@@ -182,7 +182,7 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         return actions
 
 
-    # Fast random, inverse weighted, works for multi-action
+    # random action
     elif policy_option==6:
 
         actions = np.zeros(N,dtype=int)
@@ -234,6 +234,43 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
                     rl_info['model'].arm_device_removed[i] = 1
         return actions
 
+
+    # pull lowest state
+    elif policy_option==7:
+
+        actions = np.zeros(N,dtype=int)
+
+        current_action_cost = 0
+        candidate_arms = []
+        for i in range(N):
+            if rl_info['model'].arm_device_removed[i] < 0.5 and rl_info['model'].opt_in[i] > 0.5:
+                if rl_info['model'].opt_in_steps[i] <= rl_info['model'].new_opt_in_guarantee_steps:
+                    actions[i] = 1 # we must give newly opt-in arms the device
+                    current_action_cost += 1 # assume binary action here
+                else:
+                    candidate_arms.append(i)
+        # print('num eligible arms ', len(candidate_arms) + current_action_cost, ' new optin ', current_action_cost)
+        if candidate_arms != []:
+            if B - current_action_cost >= len(candidate_arms):
+                chosen_arms = np.array(candidate_arms)
+            else:
+                # pull arms with lowest states
+                vital_signs_avg = np.average(current_state, axis=1)
+                chosen_arms = np.argsort(vital_signs_avg)[:int(B - current_action_cost)]
+                # chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
+            actions[chosen_arms] = 1
+        for i in range(N):
+            if actions[i] == 0:
+                if rl_info['model'].arm_device_usage[i] > 0 or rl_info['model'].opt_in[i] == 1:
+                    rl_info['model'].arm_device_removed[i] = 1
+                    # this arm used the device, and later we remove the device from this arm.
+                    # thus, according to given constraints, from now on, we can no longer give the device to this arm.
+            else: # actions[i] == 1:
+                rl_info['model'].arm_device_usage[i] += 1
+                if rl_info['model'].arm_device_usage[i] >= rl_info['model'].max_device_usage:
+                    # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
+                    rl_info['model'].arm_device_removed[i] = 1
+        return actions
 
     # LP to compute the index policies (online vs. oracle version)
     elif policy_option==22:
@@ -588,6 +625,7 @@ if __name__=="__main__":
             5: 'Round Robin',
 
             6:'RandomDS',
+            7:'LowestState',
 
             21:'Hawkins',
             22:'Whittle index',
@@ -622,8 +660,8 @@ if __name__=="__main__":
         policies = [0, 6, 21, 102]
 
         if args.no_hawkins:
-            policies = [102, 0, 6] # start with PreFeRMAB to initialize the transition dynamics.
-            # policies = [0, 6, 102]
+            policies = [102, 0, 6, 7] # start with our policy to initialize the transition dynamics.
+            # policies = [102, 0, 6]
 
         # policies = [0, 6, 102]
 
@@ -712,7 +750,7 @@ if __name__=="__main__":
 
     size_limits={
                     0:None, 1:None, 2:1000, 3:1000, 4:8,
-                    5:None, 6:None,
+                    5:None, 6:None, 7:None,
                     21:None, 22:None,
                     24:None, 25:None,
                     101:1000, 102:None

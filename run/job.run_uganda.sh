@@ -10,7 +10,7 @@ tp_transform='linear'
 opt_in_rate=2
 N=43
 
-bash run/run_uganda.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B}  \
+bash run/run_uganda_test.sh ${cdir} ${seed} 0 ${data} ${save_string} ${N} ${B}  \
     ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform} ${opt_in_rate}
 
 

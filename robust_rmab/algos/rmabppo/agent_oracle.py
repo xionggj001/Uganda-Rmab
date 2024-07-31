@@ -258,6 +258,9 @@ class AgentOracle:
 
         # choose whether we want to use feature information in learning policy
         self.use_feature = 0
+        # choose the amount of steps an arm stays in the system after opt-in
+        # (this is different from ac.max_device_usage, which is the max amount of steps an arm can get the device)
+        self.max_opt_in_steps = 50
 
         # Create actor-critic module
         ac = actor_critic(obs_dim, env.action_space, opt_in_rate=self.opt_in_rate,
@@ -537,7 +540,7 @@ class AgentOracle:
                     new_opt_in_arms[release_index:release_index + int(self.opt_in_rate)] = 1
                     env.update_transition_probs(new_opt_in_arms) # freshly sample the arms that are newly opt in
                 ac.opt_in_steps[ac.opt_in > 0.5] += 1 # update the amount of steps each opt-in arm stays in the system
-                ac.opt_in[ac.opt_in_steps >= 50] = 0 # block arms that are in the system for 50 steps or more
+                ac.opt_in[ac.opt_in_steps >= self.max_opt_in_steps] = 0 # block arms that are in the system for more than allowed opt-in steps
 
                 # print('step', t)
                 # print('opt-in', ac.opt_in)
@@ -596,7 +599,8 @@ class AgentOracle:
                         v = 0
                         last_costs = np.zeros((FINAL_ROLLOUT_LENGTH, env.N))
 
-                    buf.arm_opt_out_step = np.minimum(100, buf.arm_opt_in_step + 50) # important: must fill in opt-out steps before updating buffer
+                    # fill in opt-out steps before updating buffer
+                    buf.arm_opt_out_step = np.minimum(local_steps_per_epoch, buf.arm_opt_in_step + self.max_opt_in_steps)
                     buf.finish_path(v, last_costs)
 
                     # only save EpRet / EpLen if trajectory finished

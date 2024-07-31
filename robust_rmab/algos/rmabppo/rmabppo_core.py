@@ -138,6 +138,7 @@ class MLPActorCriticRMAB(nn.Module):
         self.opt_in_steps = np.zeros(N)
         self.opt_in_rate = opt_in_rate
         self.state_norm = 1
+
         # the following variables are used for enforcing constraints
         self.arm_device_removed = np.zeros(N) # if element i is 1, then we have removed the device from this person. we can no longer give the same person the device
         self.max_device_usage = 25 # a person can not use the device for more than a fixed number of steps

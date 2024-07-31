@@ -14,17 +14,17 @@ module load intel/24.0.1-fasrc01
 module load openmpi/5.0.2-fasrc01
 source activate uganda
 
-data="uganda"
-save_string="uganda"
-N=24
-B=5.0
+data="mimiciv"
+save_string="mimiciv"
+N=61
+B=4.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=50 
 seed=0
 cdir="."
 no_hawkins=1
 tp_transform='linear'
-opt_in_rate=1
+opt_in_rate=3
 
-bash run/run_uganda.sh ${cdir} ${SLURM_ARRAY_TASK_ID} 0 ${data} ${save_string} ${N} ${B}  \
+bash run/run_mimiciv.sh ${cdir} ${SLURM_ARRAY_TASK_ID} 0 ${data} ${save_string} ${N} ${B}  \
     ${robust_keyword} ${n_train_epochs} ${no_hawkins} ${tp_transform} ${opt_in_rate}
