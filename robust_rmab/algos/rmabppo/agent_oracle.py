@@ -232,7 +232,6 @@ class AgentOracle:
             final_train_lambdas=0,
             tp_transform=None):
 
-        
         # Special function to avoid certain slowdowns from PyTorch + MPI combo.
         setup_pytorch_for_mpi()
 
@@ -256,9 +255,13 @@ class AgentOracle:
         else: 
             print("[tp->feats] Applying {} with dim {}".format(tp_transform,ac_kwargs["input_feat_dim"]))
 
+
+        # choose whether we want to use feature information in learning policy
+        self.use_feature = 0
+
         # Create actor-critic module
         ac = actor_critic(obs_dim, env.action_space, opt_in_rate=self.opt_in_rate,
-            N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind, **ac_kwargs)
+            N = env.N, C = env.C, B = env.B, strat_ind=self.strat_ind, use_feature=self.use_feature, **ac_kwargs)
 
         act_dim = ac.act_dim
         obs_dim = ac.obs_dim
@@ -285,8 +288,6 @@ class AgentOracle:
         # Set up model saving
         logger.setup_pytorch_saver(ac)
 
-        # input dimension for featurize_tp
-        feature_input_dim = 4
 
         def featurize_tp(transition_probs, transformation=None, out_dim=4, in_dim=4):
             N = transition_probs.shape[0]
@@ -313,8 +314,9 @@ class AgentOracle:
             # this line below may not be necessary, if the transition_probs are stored as float32
             # transition_probs_tensor =  torch.from_numpy(transition_probs).float()
             obs = obs/self.state_norm
-            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
-            # full_obs = obs
+            full_obs = obs
+            if self.use_feature == 1:
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_pi_list = np.zeros(env.N,dtype=object)
             pi_info_list = np.zeros(env.N,dtype=object)
@@ -364,8 +366,9 @@ class AgentOracle:
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
 
             obs = obs/self.state_norm
-            full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
-            # full_obs = obs
+            full_obs = obs
+            if self.use_feature == 1:
+                full_obs = torch.cat([obs, lamb_to_concat, transition_probs], axis=2)
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
@@ -506,6 +509,7 @@ class AgentOracle:
                     T_matrix = T_matrix[:, :, :, 1:] # since probabilities sum up to 1, can reduce the dim of the last axis by 1
                     T_matrix = np.reshape(T_matrix, (T_matrix.shape[0], np.prod(T_matrix.shape[1:])))
                 # featurization
+                feature_input_dim = T_matrix.shape[1]
                 ac.feature_arr = featurize_tp(T_matrix, transformation=tp_transform, out_dim=ac_kwargs["input_feat_dim"], in_dim=feature_input_dim)
 
 
@@ -719,7 +723,7 @@ if __name__ == '__main__':
     parser.add_argument('--agent_train_vf_iters', type=int, default=20, help="Training iterations to run per epoch")
     parser.add_argument('--agent_lamb_update_freq', type=int, default=4, help="Number of epochs that should pass before updating the lambda network (so really it is a period, not frequency)") # 4
     parser.add_argument('--agent_tp_transform', type=str, default=None, help="Type of transform to apply to transition probabilities, if any") 
-    parser.add_argument('--agent_tp_transform_dims', type=int, default=None, help="Number of output features to generate from input tps; only used if tp_transform is True") 
+    parser.add_argument('--agent_tp_transform_dims', type=int, default=6, help="Number of output features to generate from input tps; only used if tp_transform is True")
     parser.add_argument('--pop_size', type=int, default=0)
     parser.add_argument('--scheduler_discount', type=float, default=0.99999) # 0.99999 is effectively removing scheduler
 

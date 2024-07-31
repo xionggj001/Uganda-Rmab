@@ -6,7 +6,7 @@ n_train_epochs=30
 seed=0
 cdir="."
 no_hawkins=1
-tp_transform=None
+tp_transform='linear'
 opt_in_rate=2
 N=43
 

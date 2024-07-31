@@ -23,7 +23,7 @@ n_train_epochs=50
 seed=0
 cdir="."
 no_hawkins=1
-tp_transform=None
+tp_transform='linear'
 opt_in_rate=3
 
 bash run/run_mimiciii.sh ${cdir} ${SLURM_ARRAY_TASK_ID} 0 ${data} ${save_string} ${N} ${B}  \

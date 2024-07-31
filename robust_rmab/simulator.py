@@ -364,7 +364,7 @@ def load_pytorch_policy(fpath, itr, deterministic=False):
 
     return model
 
-def featurize_tp(transition_probs, transformation=None, out_dim=4):
+def featurize_tp(transition_probs, transformation=None, out_dim=6):
     N = transition_probs.shape[0]
     output_features = np.zeros((N, out_dim))
     np.random.seed(0)  # Set random seed for reproducibility

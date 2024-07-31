@@ -128,10 +128,11 @@ class MLPActorCriticRMAB(nn.Module):
 
     def __init__(self, obs_dim, action_space, opt_in_rate=1.0,
                  hidden_sizes=(64,64), input_feat_dim=4, C=None, N=None, B=None,
-                 strat_ind=0, activation=nn.Tanh,
+                 strat_ind=0, activation=nn.Tanh, use_feature=0
                  ):
         super().__init__()
 
+        self.use_feature = use_feature
         self.feature_arr = np.zeros((N, input_feat_dim))
         self.opt_in = np.ones(N) # assume all arms opt-in at the start
         self.opt_in_steps = np.zeros(N)
@@ -161,10 +162,11 @@ class MLPActorCriticRMAB(nn.Module):
         self.activation = activation
 
         self.input_feat_dim = input_feat_dim
-        # self.pi_list = MLPCategoricalActor(self.obs_dim, self.act_dim, hidden_sizes, activation)
-        # self.v_list  = MLPCritic(self.obs_dim, hidden_sizes, activation)
-        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
-        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, hidden_sizes, activation)
+        self.pi_list = MLPCategoricalActor(self.obs_dim, self.act_dim, hidden_sizes, activation)
+        self.v_list  = MLPCritic(self.obs_dim, hidden_sizes, activation)
+        if self.use_feature == 1:
+            self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
+            self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, hidden_sizes, activation)
         self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, hidden_sizes, activation)
 
         # Lambda_net is currently expected one input per arm, but other
@@ -209,10 +211,11 @@ class MLPActorCriticRMAB(nn.Module):
 
 
     def reset_actor_and_critic_networks(self):
-        # self.pi_list = MLPCategoricalActor(self.obs_dim, self.act_dim, self.hidden_sizes, self.activation)
-        # self.v_list  = MLPCritic(self.obs_dim, self.hidden_sizes, self.activation)
-        self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
-        self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, self.hidden_sizes, self.activation)
+        self.pi_list = MLPCategoricalActor(self.obs_dim, self.act_dim, self.hidden_sizes, self.activation)
+        self.v_list  = MLPCritic(self.obs_dim, self.hidden_sizes, self.activation)
+        if use_feature == 1:
+            self.pi_list = MLPCategoricalActor(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
+            self.v_list  = MLPCritic(self.obs_dim+1+self.input_feat_dim, self.hidden_sizes, self.activation)
         self.q_list = MLPQCritic(self.obs_dim+1+self.input_feat_dim, self.act_dim, self.hidden_sizes, self.activation)
 
 
@@ -244,8 +247,9 @@ class MLPActorCriticRMAB(nn.Module):
                     if self.opt_in_steps[i] <= self.new_opt_in_guarantee_steps:
                         pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
                     else:
-                        full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
-                        # full_obs = obs[i]
+                        full_obs = obs[i]
+                        if self.use_feature == 1:
+                            full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
                         full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                         pi_list[i] = self.pi_list._distribution(full_obs).probs.detach().numpy()
 
@@ -284,8 +288,9 @@ class MLPActorCriticRMAB(nn.Module):
 
             # compute loss prob of actions
             for i in range(self.N):
-                full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
-                # full_obs = obs[i]
+                full_obs = obs[i]
+                if self.use_feature == 1:
+                    full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
                 full_obs = torch.as_tensor(full_obs,dtype=torch.float32)
                 pi = self.pi_list._distribution(full_obs)
                 logp_a = self.pi_list._log_prob_from_distribution(pi, torch.tensor(a_list[i], dtype=torch.int8))
@@ -406,8 +411,9 @@ class MLPActorCriticRMAB(nn.Module):
                     if self.opt_in_steps[i] <= self.new_opt_in_guarantee_steps:
                         pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
                     else:
-                        full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
-                        # full_obs = obs[i]
+                        full_obs = obs[i]
+                        if self.use_feature == 1:
+                            full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
                         # print(full_obs)
                         full_obs = torch.as_tensor(full_obs, dtype=torch.float32)
 
@@ -617,7 +623,7 @@ class MLPActorCriticRMAB(nn.Module):
         # print(action)
         return action
 
-    def featurize_tp(self, transition_probs, transformation=None, out_dim=4, in_dim=4):
+    def featurize_tp(self, transition_probs, transformation=None, out_dim=6, in_dim=6):
         N = transition_probs.shape[0]
         output_features = np.zeros((N, out_dim))
         np.random.seed(0)  # Set random seed for reproducibility
