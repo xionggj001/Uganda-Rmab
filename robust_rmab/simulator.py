@@ -196,10 +196,13 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
                     current_action_cost += 1 # assume binary action here
                 else:
                     candidate_arms.append(i)
-        print('num eligible arms ', len(candidate_arms) + current_action_cost, ' new optin ', current_action_cost)
+        # print('num eligible arms ', len(candidate_arms) + current_action_cost, ' new optin ', current_action_cost)
         if candidate_arms != []:
-            chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
-            actions[chosen_arms] = np.ones(int(B - current_action_cost), dtype=int)
+            if B - current_action_cost >= len(candidate_arms):
+                chosen_arms = np.array(candidate_arms)
+            else:
+                chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
+            actions[chosen_arms] = 1
         # if current_action_cost < B: # this is for multi-action
         #     candidate_arms = np.array(candidate_arms)
         #     process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
@@ -485,8 +488,8 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
                             data_dict=data_dict, env=env,
                             valid_action_combinations=valid_action_combinations)
         actions = actions.reshape(N,-1)
-        if policy_option == 6:
-            print('step ', t, 'sum action ', sum(actions))
+        # if policy_option == 6:
+            # print('step ', t, 'sum action ', sum(actions))
         # print('policy option', policy_option, 'round ', t, 'complete')
 
         action_log[:, t-1]=actions
@@ -687,7 +690,7 @@ if __name__=="__main__":
 
 
     # N=args.num_arms
-    N = int(args.opt_in_rate * (args.simulation_length / 5) + args.budget) # every 5 steps, we have opt_in_rate many arms opt-in
+    N = int(args.opt_in_rate * (args.simulation_length / 5 - 1) + args.budget) # every 5 steps, we have opt_in_rate many arms opt-in
     print('N', N)
     L=args.simulation_length
     savestring=args.save_string

@@ -51,14 +51,14 @@ intervention_success_rate=0.7
 
 variability_window=5
 
-vital_alarm = pd.read_csv(setting+'.csv')
-
-if sample_size!=-1:
-  all_patient_ids = vital_alarm['patient_id'].unique()
-  np.random.seed(42)
-  random_patient_ids = np.random.choice(all_patient_ids, size=sample_size, replace=False)
-  restricted_df = vital_alarm[vital_alarm['patient_id'].isin(random_patient_ids)]
-  vital_alarm=restricted_df
+# vital_alarm = pd.read_csv(setting+'.csv')
+#
+# if sample_size!=-1:
+#   all_patient_ids = vital_alarm['patient_id'].unique()
+#   np.random.seed(42)
+#   random_patient_ids = np.random.choice(all_patient_ids, size=sample_size, replace=False)
+#   restricted_df = vital_alarm[vital_alarm['patient_id'].isin(random_patient_ids)]
+#   vital_alarm=restricted_df
 
 #HELPER
 def create_training_dataset3(pivot_df, num_timesteps, time_size, min_entries=1):

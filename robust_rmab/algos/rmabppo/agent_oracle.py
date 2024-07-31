@@ -48,6 +48,8 @@ class RMABPPO_Buffer:
 
         self.gamma, self.lam_OTHER = gamma, lam_OTHER
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
+        self.arm_opt_in_step = np.zeros(N, dtype=int)
+        self.arm_opt_out_step = np.ones(N, dtype=int) * 100
         self.act_type = act_type
         self.act_dim = act_dim
 
@@ -95,23 +97,22 @@ class RMABPPO_Buffer:
         """
 
         path_slice = slice(self.path_start_idx, self.ptr)
-
         arm_summed_costs = np.zeros(self.ptr - self.path_start_idx + 1)
 
         for i in range(self.N):
+            # adjust slice according to arm's opt-in and opt-out step
+            path_slice = slice(self.arm_opt_in_step[i], self.arm_opt_out_step[i])
+            arm_summed_costs = np.zeros(self.arm_opt_out_step[i] - self.arm_opt_in_step[i] + 1)
+
             rews = np.append(self.rew_buf[path_slice, i], last_vals[i])
-            # TODO implement training that makes use of last_costs, i.e., use all samples to update lam
             costs = np.append(self.cost_buf[path_slice, i], 0)
-            if self.opt_in_buf[self.ptr - 1, i] == 0:
-                costs = 0 * costs # hardcoded for now. later: read the cost of no action from the env
-                rews = 0 * rews # dummy arms produce no reward.
             # print(costs)
-            lambds = np.append(self.lamb_buf[path_slice], 0)
+            # lambds = np.append(self.lamb_buf[path_slice], 0)
 
             arm_summed_costs += costs
             # adjust based on action costs
 
-            rews = rews - lambds*costs
+            # rews = rews - lambds*costs
 
             vals = np.append(self.val_buf[path_slice, i], last_vals[i])
             
@@ -126,8 +127,7 @@ class RMABPPO_Buffer:
             # store the learned q functions
             self.q_buf[path_slice, i]   = qs
             
-            self.path_start_idx = self.ptr
-
+            # self.path_start_idx = self.ptr
 
         # the next line computes costs-to-go, to be part of the loss for the lambda net
         self.cdcost_buf[path_slice] = core.discount_cumsum(arm_summed_costs, self.gamma)[:-1]
@@ -152,7 +152,8 @@ class RMABPPO_Buffer:
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                 adv=self.adv_buf, logp=self.logp_buf, qs=self.q_buf, oha=self.oha_buf, 
                 costs=self.cdcost_buf, lambdas=self.lamb_buf,
-                transition_probs=self.transition_probs_buf, opt_in=self.opt_in_buf)
+                transition_probs=self.transition_probs_buf,
+                opt_in_step=self.arm_opt_in_step, opt_out_step=self.arm_opt_out_step)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
 
@@ -304,10 +305,9 @@ class AgentOracle:
 
         # Set up function for computing RMABPPO policy loss
         def compute_loss_pi(data, entropy_coeff):
-            act, adv, logp_old, lambdas, obs, transition_probs, opt_in = \
+            act, adv, logp_old, lambdas, obs, transition_probs, opt_in_step, opt_out_step = \
                 data['act'], data['adv'], data['logp'], data['lambdas'], \
-                data['obs'], data['transition_probs'], data['opt_in']
-
+                data['obs'], data['transition_probs'], data['opt_in_step'], data['opt_out_step']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # this line below may not be necessary, if the transition_probs are stored as float32
@@ -324,27 +324,24 @@ class AgentOracle:
                 # if sum(act[:,i]) == 0:
                 #     continue # all actions are zeros would cause an error in ac.pi_list computation
                 # calculate when this arm was released
-                release_step = 0
-                if i >= env.B:
-                    release_step = int((1 + (i - env.B) // self.opt_in_rate) * 5)
-                opt_out_step = min(local_steps_per_epoch, 50 + release_step)
-                if opt_out_step - release_step <= 5:
+                if opt_out_step[i] - opt_out_step[i] <= 5:
                     continue # these arms are newly opt-in. don't have useful information from them
                 pi_optimizer.zero_grad()
 
-                pi, logp = ac.pi_list(full_obs[release_step:opt_out_step, i], act[release_step:opt_out_step, i])
+                path_slice = slice(int(opt_in_step[i]), int(opt_out_step[i]))
+                pi, logp = ac.pi_list(full_obs[path_slice, i], act[path_slice, i])
                 # pi, logp = ac.pi_list(full_obs[:, i], act[:, i])
                 ent = pi.entropy().mean()
-                ratio = torch.exp(logp - logp_old[release_step:opt_out_step, i])
-                clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[release_step:opt_out_step, i]
-                loss_pi = -(torch.min(ratio * adv[release_step:opt_out_step, i], clip_adv)).mean()
+                ratio = torch.exp(logp - logp_old[path_slice, i])
+                clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv[path_slice, i]
+                loss_pi = -(torch.min(ratio * adv[path_slice, i], clip_adv)).mean()
                 
                 # subtract entropy term since we want to encourage it 
                 loss_pi -= entropy_coeff*ent
                 loss_pi_list[i] = loss_pi
 
                 # Useful extra info
-                approx_kl = (logp_old[release_step:opt_out_step, i] - logp).mean().item()
+                approx_kl = (logp_old[path_slice, i] - logp).mean().item()
                 
                 clipped = ratio.gt(1+clip_ratio) | ratio.lt(1-clip_ratio)
                 clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
@@ -359,9 +356,9 @@ class AgentOracle:
 
         # Set up function for computing value loss
         def compute_loss_v(data):
-            ret, lambdas, obs, transition_probs, opt_in = \
+            ret, lambdas, obs, transition_probs, opt_in_step, opt_out_step = \
                 data['ret'], data['lambdas'], data['obs'], \
-                data['transition_probs'], data['opt_in']
+                data['transition_probs'], data['opt_in_step'], data['opt_out_step']
             lamb_to_concat = np.repeat(lambdas, env.N).reshape(-1,env.N,1)
             full_obs = None
             # transition_probs_tensor = torch.from_numpy(transition_probs_tensor).float()
@@ -372,15 +369,12 @@ class AgentOracle:
 
             loss_list = np.zeros(env.N,dtype=object)
             for i in range(env.N):
-                release_step = 0
-                if i >= env.B:
-                    release_step = int((1 + (i - env.B) // self.opt_in_rate) * 5)
-                opt_out_step = min(local_steps_per_epoch, 50 + release_step)
-                if opt_out_step - release_step <= 5:
+                if opt_out_step[i] - opt_in_step[i] <= 5:
                     continue # these arms are newly opt-in. don't have useful information from them
 
                 vf_optimizer.zero_grad()
-                loss_list[i] = ((ac.v_list(full_obs[release_step:opt_out_step, i]) - ret[release_step:opt_out_step, i])**2).mean()
+                path_slice = slice(int(opt_in_step[i]), int(opt_out_step[i]))
+                loss_list[i] = ((ac.v_list(full_obs[path_slice, i]) - ret[path_slice, i])**2).mean()
                 loss_list[i].backward()
                 vf_optimizer.step()
             return loss_list
@@ -527,14 +521,20 @@ class AgentOracle:
             ac.arm_device_usage = np.zeros(N) # reset tracker (how many steps has am arm used the device)
             ac.opt_in = np.ones(N) # reset opt-in status
             ac.opt_in_steps = np.zeros(N) # reset tracker (the amount of steps each opt-in arm stays in the system)
+            buf.arm_opt_in_step = np.zeros(N, dtype=int) * local_steps_per_epoch # important to initialize as zeros, since first B arms opt-in at step 0
 
             ac.opt_in[int(env.B):] *= 0 # block all arms except for first B arms
             for t in range(local_steps_per_epoch):
                 if t % 5 == 0 and t > 1:
                     release_index = int(env.B + self.opt_in_rate * ((t // 5) - 1))
                     ac.opt_in[release_index:release_index + int(self.opt_in_rate)] = 1 # release a blocked arm
+                    buf.arm_opt_in_step[release_index:release_index + int(self.opt_in_rate)] = int(t)
+                    new_opt_in_arms = np.zeros(N, dtype=int)
+                    new_opt_in_arms[release_index:release_index + int(self.opt_in_rate)] = 1
+                    env.update_transition_probs(new_opt_in_arms) # freshly sample the arms that are newly opt in
                 ac.opt_in_steps[ac.opt_in > 0.5] += 1 # update the amount of steps each opt-in arm stays in the system
                 ac.opt_in[ac.opt_in_steps >= 50] = 0 # block arms that are in the system for 50 steps or more
+
                 # print('step', t)
                 # print('opt-in', ac.opt_in)
                 # print('opt-in-steps', ac.opt_in_steps)
@@ -591,6 +591,8 @@ class AgentOracle:
                     else:
                         v = 0
                         last_costs = np.zeros((FINAL_ROLLOUT_LENGTH, env.N))
+
+                    buf.arm_opt_out_step = np.minimum(100, buf.arm_opt_in_step + 50) # important: must fill in opt-out steps before updating buffer
                     buf.finish_path(v, last_costs)
 
                     # only save EpRet / EpLen if trajectory finished
@@ -750,7 +752,7 @@ if __name__ == '__main__':
     # logger_kwargs = setup_logger_kwargs(exp_name, args.seed, data_dir=data_dir)
 
     # N = args.N
-    N = int(args.opt_in_rate * (args.agent_steps / 5) + args.B) # every 5 steps, we have opt_in_rate many arms opt-in
+    N = int(args.opt_in_rate * (args.agent_steps / 5 - 1) + args.B) # every 5 steps, we have opt_in_rate many arms opt-in
     print('N', N)
     S = args.S
     A = args.A
