@@ -16,7 +16,7 @@ source activate uganda
 
 data="mimiciii"
 save_string="mimiciii"
-N=70
+N=67
 B=10.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=50 

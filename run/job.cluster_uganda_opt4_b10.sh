@@ -16,7 +16,7 @@ source activate uganda
 
 data="uganda"
 save_string="uganda"
-N=90
+N=86
 B=10.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=50 

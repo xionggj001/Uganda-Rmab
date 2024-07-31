@@ -1,6 +1,6 @@
 data="mimiciv"
 save_string="mimiciv"
-N=45
+N=43
 B=5.0
 robust_keyword="sample_random" # other option is "mid"
 n_train_epochs=50 
