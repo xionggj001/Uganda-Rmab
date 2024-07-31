@@ -6,8 +6,8 @@ python3 ${1}/robust_rmab/simulator.py --discount 0.9 \
     -opt ${12} \
     -s ${2} -ws ${2} \
     -rlmfr ${1}/data/${exp_name}/${exp_name}_s${2}/ \
-    -L 10 \
-    -n 50 \
+    -L 100 \
+    -n 10 \
     --robust_keyword ${8} \
     --file_root ${1} \
     --save_string ${5} \

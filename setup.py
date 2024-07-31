@@ -24,7 +24,9 @@ setup(
         'torch',
         'gym',
         'nashpy',
-        'tqdm'
+        'tqdm',
+        'seaborn',
+        'scikit-learn'
     ],
     description="Robust RMAB double oracle and Deep RL code. Adapted from OpenAI's SpinningUp repository",
 )

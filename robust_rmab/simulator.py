@@ -8,6 +8,7 @@ from robust_rmab.environments.bandit_env import SISBanditEnv, RandomBanditEnv, R
 from robust_rmab.environments.bandit_env_robust import ToyRobustEnv, CounterExampleRobustEnv, ARMMANRobustEnv, SISRobustEnv, FakeT, ContinuousStateExampleEnv
 from robust_rmab.environments.bandit_env_uganda import UgandaEnv
 from robust_rmab.environments.bandit_env_mimiciv import MimicivEnv
+from robust_rmab.environments.bandit_env_mimiciii import MimiciiiEnv
 
 import os
 import os.path as osp
@@ -190,38 +191,47 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         candidate_arms = []
         for i in range(N):
             if rl_info['model'].arm_device_removed[i] < 0.5 and rl_info['model'].opt_in[i] > 0.5:
-                candidate_arms.append(i)
-        candidate_arms = np.array(candidate_arms)
-        process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
-
-        for arm in process_order:
-            
-            # select an action at random
-            num_valid_actions_left = len(C[C<=B-current_action_cost])
-            p = 1/(C[C<=B-current_action_cost]+1)
-            p = p/p.sum()
-            p = None
-            a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
-            current_action_cost += C[a]
-            # if the next selection takes us over budget, break
-            if current_action_cost > B:
-                break
-
-            actions[arm] = a
+                if rl_info['model'].opt_in_steps[i] <= rl_info['model'].new_opt_in_guarantee_steps:
+                    actions[i] = 1 # we must give newly opt-in arms the device
+                    current_action_cost += 1 # assume binary action here
+                else:
+                    candidate_arms.append(i)
+        # print('num eligible arms ', len(candidate_arms) + current_action_cost, ' new optin ', current_action_cost)
+        if candidate_arms != []:
+            if B - current_action_cost >= len(candidate_arms):
+                chosen_arms = np.array(candidate_arms)
+            else:
+                chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
+            actions[chosen_arms] = 1
+        # if current_action_cost < B: # this is for multi-action
+        #     candidate_arms = np.array(candidate_arms)
+        #     process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
+        #
+        #     for arm in process_order: # we only process eligible arms
+        #         # select an action at random
+        #         num_valid_actions_left = len(C[C<=B-current_action_cost])
+        #         p = 1/(C[C<=B-current_action_cost]+1)
+        #         p = p/p.sum()
+        #         p = None
+        #         a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
+        #         current_action_cost += C[a]
+        #         # if the next selection takes us over budget, break
+        #         if current_action_cost > B:
+        #             break
+        #         actions[arm] = a
 
         # update self.arm_device_removed
         for i in range(N):
-            if rl_info['model'].arm_device_usage[i] > 0 and actions[i] == 0:
-                rl_info['model'].arm_device_removed[i] = 1
-                # this arm used the device, and later we remove the device from this arm.
-                # thus, according to given constraints, from now on, we can no longer give the device to this arm.
-            if actions[i] == 1:
+            if actions[i] == 0:
+                if rl_info['model'].arm_device_usage[i] > 0 or rl_info['model'].opt_in[i] == 1:
+                    rl_info['model'].arm_device_removed[i] = 1
+                    # this arm used the device, and later we remove the device from this arm.
+                    # thus, according to given constraints, from now on, we can no longer give the device to this arm.
+            else: # actions[i] == 1:
                 rl_info['model'].arm_device_usage[i] += 1
                 if rl_info['model'].arm_device_usage[i] >= rl_info['model'].max_device_usage:
                     # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
                     rl_info['model'].arm_device_removed[i] = 1
-
-
         return actions
 
 
@@ -396,8 +406,8 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             rl_info['model'] = model
         if policy_option == 102:
             model = load_pytorch_policy(rl_info['model_file_path_rmab'], "")
-            env.env.update_transition_probs(np.ones(env.env.N), mode='eval')
-            if data_dict['dataset_name'] == 'uganda' or data_dict['dataset_name'] == 'mimiciv':
+            env.env.update_transition_probs(np.ones(env.env.N), mode='eval') # resample arms for every trial
+            if data_dict['dataset_name'] in ['uganda', 'mimiciv', 'mimiciii']:
                 T_matrix = env.features
             else:
                 T_matrix = env.env.model_input_T if hasattr(env.env, 'model_input_T') else env.env.T
@@ -405,9 +415,6 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
             model.transition_param_arr = T_matrix
             model.feature_arr = model.featurize_tp(T_matrix, transformation=model.tp_transform, out_dim=model.out_dim, in_dim=model.feature_input_dim)
             model.opt_in = env.params
-            for arm_index in range(env.env.N):
-                    if model.opt_in[arm_index] < 0.5:
-                        model.feature_arr[arm_index] *= 0 # to make dummy arms more obvious to the lambda net
             rl_info['model'] =  model
 
     print('Running simulation w/ policy: %s'%policy_option)
@@ -461,17 +468,29 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
     print("Policy:", policy_option)
 
     ep_ret = 0
-    rl_info['model'].arm_device_removed = np.zeros(rl_info['model'].N) # reset tracker (whether we remove the device from an arm)
-    rl_info['model'].arm_device_usage = np.zeros(rl_info['model'].N) # reset tracker (how many steps has am arm used the device)
+    # rl_info['model'].arm_device_removed = np.zeros(rl_info['model'].N) # reset tracker (whether we remove the device from an arm)
+    # rl_info['model'].arm_device_usage = np.zeros(rl_info['model'].N) # reset tracker (how many steps has am arm used the device)
 
+    rl_info['model'].arm_device_removed = np.zeros(N)  # reset tracker (whether we remove the device from an arm)
+    rl_info['model'].arm_device_usage = np.zeros(N)  # reset tracker (how many steps has am arm used the device)
+    rl_info['model'].opt_in = np.ones(N)  # reset opt-in status
+    rl_info['model'].opt_in_steps = np.zeros(N)  # reset tracker (the amount of steps each opt-in arm stays in the system)
+    rl_info['model'].opt_in[int(env.B):] *= 0  # block all arms except for first B arms
     for t in range(1,L):
-        print("Round %s"%t)
-
+        if t % 5 == 0 and t > 1:
+            release_index = int(env.B + 2 * (t // 5) - 2)
+            rl_info['model'].opt_in[release_index:release_index + 2] = 1  # release a blocked arm
+        rl_info['model'].opt_in_steps[rl_info['model'].opt_in > 0.5] += 1  # update the amount of steps each opt-in arm stays in the system
+        rl_info['model'].opt_in[rl_info['model'].opt_in_steps >= 50] = 0  # block arms that are in the system for 50 steps or more
+        # print("Round %s"%t)
         actions=getActions(N, T, R, C, B, t, policy_option, env.action_space,
                             rl_info=rl_info, current_state=state_log[:,t-1],
                             data_dict=data_dict, env=env,
                             valid_action_combinations=valid_action_combinations)
         actions = actions.reshape(N,-1)
+        # if policy_option == 6:
+            # print('step ', t, 'sum action ', sum(actions))
+        # print('policy option', policy_option, 'round ', t, 'complete')
 
         action_log[:, t-1]=actions
         EPS = 1e-6
@@ -517,6 +536,7 @@ if __name__=="__main__":
     parser.add_argument('-d', '--data', default='real', type=str,help='Method for generating transition probabilities',
                             choices=[   'uganda',
                                         'mimiciv',
+                                        'mimiciii',
                                         'continuous_state'
                                     ])
 
@@ -669,7 +689,9 @@ if __name__=="__main__":
 
 
 
-    N=args.num_arms
+    # N=args.num_arms
+    N = int(args.opt_in_rate * (args.simulation_length / 5 - 1) + args.budget) # every 5 steps, we have opt_in_rate many arms opt-in
+    print('N', N)
     L=args.simulation_length
     savestring=args.save_string
     N_TRIALS=args.num_trials
@@ -755,11 +777,12 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
@@ -775,11 +798,12 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
@@ -796,11 +820,33 @@ if __name__=="__main__":
 
         current_state = np.random.get_state()
         np.random.seed()  # Or any other seed you'd like to use
-        num_opt_in = int(round(N * opt_in_rate))
-        opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
-        opt_in_status = np.zeros(N)
-        opt_in_status[opt_in_indices] = 1
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
         np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
+
+        env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
+        env.env.update_transition_probs(np.ones(env.env.N))
+        # for now, in testing, assume all arms are opt-in.
+
+    if args.data == 'mimiciii':
+        env = MimiciiiEnv(N, B, seedbase)
+        # env.update_transition_probs(np.ones(env.N)) # initialize all transition probs
+
+        T = 0
+        R = 0
+        C = env.C
+
+        current_state = np.random.get_state()
+        np.random.seed()  # Or any other seed you'd like to use
+        # num_opt_in = int(round(N * opt_in_rate))
+        # opt_in_indices = np.random.choice(N, num_opt_in, replace=False)
+        # opt_in_status = np.zeros(N)
+        # opt_in_status[opt_in_indices] = 1
+        np.random.set_state(current_state)
+        opt_in_status = np.ones(N)
 
         env = RobustEnvWrapper(env, opt_in_status) # here the second argument is opt_in decisions.
         env.env.update_transition_probs(np.ones(env.env.N))
@@ -884,8 +930,6 @@ if __name__=="__main__":
         env.random_stream.rand()
         
     for i in range(N_TRIALS):
-        # in each trial, we use freshly sampled unseen arms
-        # env.env.update_transition_probs(np.ones(env.env.N))
 
         if valid_action_combinations is None:
             combinatorial_policies = set(policies) & set([4, 101])

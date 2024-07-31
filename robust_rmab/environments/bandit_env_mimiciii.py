@@ -25,16 +25,16 @@ sample_size=-1
 num_timesteps=1
 '''
 
-'''
+
 setting="mimiciii"
 min_entries=10 # Only keep icu stays with 10 measurements in two consecutive hours
 time_size=60 # Summarized time windoes
-sample_size=5000
+sample_size=1000
 vital_signs = ['PULSE_RATE',  'RESPIRATORY_RATE','SPO2'] #'COVERED_SKIN_TEMPERATURE' is available but too sparse
 num_comp=5 #Number of components of the Gaussian THIS CAN BE FREELY ADAPTED
 num_timesteps=1
-'''
 
+'''
 setting="mimiciv"
 min_entries=10
 time_size=60
@@ -42,6 +42,7 @@ vital_signs = ['PULSE_RATE',  'RESPIRATORY_RATE','COVERED_SKIN_TEMPERATURE'] #'B
 num_comp=5
 sample_size=-1
 num_timesteps=1
+'''
 
 degree_of_arm_noise=0.15
 
@@ -614,7 +615,7 @@ def resample_values(min_max,given_indices,mean,cov):
   reward=reward_function(dict(zip(vital_signs,current_signs)),rev_norm=True,o_values=min_max)
   return [current_signs,variability,signs_history],reward
 
-class MimicivEnv(gym.Env):
+class MimiciiiEnv(gym.Env):
     def __init__(self, N, B, seed):
         self.N = N
         self.gmm, self.min_max = create_model()
