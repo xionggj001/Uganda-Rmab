@@ -137,11 +137,11 @@ class MLPActorCriticRMAB(nn.Module):
         self.opt_in_steps = np.zeros(N)
         self.opt_in_rate = opt_in_rate
         self.state_norm = 1
-        # if we give a person the device and later remove it, we can no longer give the same person the device at the same epoch
-        self.arm_device_removed = np.zeros(N)
-        # a person can not use the device for more than a fixed number of steps
-        self.max_device_usage = 25
+        # the following variables are used for enforcing constraints
+        self.arm_device_removed = np.zeros(N) # if element i is 1, then we have removed the device from this person. we can no longer give the same person the device
+        self.max_device_usage = 25 # a person can not use the device for more than a fixed number of steps
         self.arm_device_usage = np.zeros(N) # track for how many steps has this arm used the device
+        self.new_opt_in_guarantee_steps = 3 # we must give newly opt-in arms the device for this number of steps
 
         # one-hot-encode the states for now
         self.obs_dim = obs_dim
@@ -239,10 +239,9 @@ class MLPActorCriticRMAB(nn.Module):
             v_list = np.zeros(self.N) # not to confuse with self.v_list
             logp_a_list = np.zeros(self.N)
             pi_list = np.zeros((self.N, self.act_dim), dtype=float)
-
             for i in range(self.N):
                 if arms_eligible[i] > 0.5:
-                    if self.opt_in_steps[i] <= 3:
+                    if self.opt_in_steps[i] <= self.new_opt_in_guarantee_steps:
                         pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
                     else:
                         full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])
@@ -404,7 +403,7 @@ class MLPActorCriticRMAB(nn.Module):
 
             for i in range(self.N):
                 if arms_eligible[i] > 0.5:
-                    if self.opt_in_steps[i] <= 3:
+                    if self.opt_in_steps[i] <= self.new_opt_in_guarantee_steps:
                         pi_list[i, 1:] = 100  # we must give newly opt-in arms the device
                     else:
                         full_obs = np.concatenate([obs[i],[lamb],self.feature_arr[i]])

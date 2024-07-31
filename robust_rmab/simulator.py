@@ -191,27 +191,31 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
         candidate_arms = []
         for i in range(N):
             if rl_info['model'].arm_device_removed[i] < 0.5 and rl_info['model'].opt_in[i] > 0.5:
-                if rl_info['model'].opt_in_steps[i] <= 3:
+                if rl_info['model'].opt_in_steps[i] <= rl_info['model'].new_opt_in_guarantee_steps:
                     actions[i] = 1 # we must give newly opt-in arms the device
                     current_action_cost += 1 # assume binary action here
                 else:
                     candidate_arms.append(i)
-        if current_action_cost < B: # only proceed if there is still unused budget
-            candidate_arms = np.array(candidate_arms)
-            process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
-
-            for arm in process_order: # we only process eligible arms
-                # select an action at random
-                num_valid_actions_left = len(C[C<=B-current_action_cost])
-                p = 1/(C[C<=B-current_action_cost]+1)
-                p = p/p.sum()
-                p = None
-                a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
-                current_action_cost += C[a]
-                # if the next selection takes us over budget, break
-                if current_action_cost > B:
-                    break
-                actions[arm] = a
+        print('num eligible arms ', len(candidate_arms) + current_action_cost, ' new optin ', current_action_cost)
+        if candidate_arms != []:
+            chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
+            actions[chosen_arms] = np.ones(int(B - current_action_cost), dtype=int)
+        # if current_action_cost < B: # this is for multi-action
+        #     candidate_arms = np.array(candidate_arms)
+        #     process_order = np.random.choice(candidate_arms, len(candidate_arms), replace=False)
+        #
+        #     for arm in process_order: # we only process eligible arms
+        #         # select an action at random
+        #         num_valid_actions_left = len(C[C<=B-current_action_cost])
+        #         p = 1/(C[C<=B-current_action_cost]+1)
+        #         p = p/p.sum()
+        #         p = None
+        #         a = np.random.choice(np.arange(num_valid_actions_left), 1, p=p)[0]
+        #         current_action_cost += C[a]
+        #         # if the next selection takes us over budget, break
+        #         if current_action_cost > B:
+        #             break
+        #         actions[arm] = a
 
         # update self.arm_device_removed
         for i in range(N):
@@ -225,7 +229,6 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
                 if rl_info['model'].arm_device_usage[i] >= rl_info['model'].max_device_usage:
                     # this arm used the device for the max amount of steps allowed. we can no longer give this arm the device
                     rl_info['model'].arm_device_removed[i] = 1
-
         return actions
 
 
@@ -482,6 +485,8 @@ def simulateAdherence(N, L, T, R, C, B, policy_option, start_state, seedbase=Non
                             data_dict=data_dict, env=env,
                             valid_action_combinations=valid_action_combinations)
         actions = actions.reshape(N,-1)
+        if policy_option == 6:
+            print('step ', t, 'sum action ', sum(actions))
         # print('policy option', policy_option, 'round ', t, 'complete')
 
         action_log[:, t-1]=actions

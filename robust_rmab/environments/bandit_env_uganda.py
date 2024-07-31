@@ -21,7 +21,7 @@ min_entries=10
 time_size=60
 # vital_signs = ['COVERED_SKIN_TEMPERATURE', 'PULSE_RATE',  'RESPIRATORY_RATE','SPO2']
 vital_signs = ['COVERED_SKIN_TEMPERATURE', 'PULSE_RATE',  'RESPIRATORY_RATE']
-num_comp=5
+num_comp=5 # try 3 or 4
 sample_size=-1
 num_timesteps=1
 
