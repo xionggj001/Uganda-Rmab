@@ -30,7 +30,7 @@ setting="mimiciii"
 min_entries=10 # Only keep icu stays with 10 measurements in two consecutive hours
 time_size=60 # Summarized time windoes
 sample_size=1000
-vital_signs = ['PULSE_RATE',  'RESPIRATORY_RATE','SPO2'] #'COVERED_SKIN_TEMPERATURE' is available but too sparse
+vital_signs = ['SPO2', 'PULSE_RATE',  'RESPIRATORY_RATE'] #'COVERED_SKIN_TEMPERATURE' is available but too sparse
 num_comp=5 #Number of components of the Gaussian THIS CAN BE FREELY ADAPTED
 num_timesteps=1
 

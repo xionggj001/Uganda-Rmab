@@ -255,7 +255,10 @@ def getActions(N, T, R, C, B, t, policy_option, act_dim, rl_info=None,
                 chosen_arms = np.array(candidate_arms)
             else:
                 # pull arms with lowest states
-                vital_signs_avg = np.average(current_state, axis=1)
+                normalized_state = -current_state # pull arm with high pulse rate, respiratory rate
+                if data_dict['dataset_name'] in ['uganda', 'mimiciii']: # 'uganda', 'mimiciv', 'mimiciii'
+                    normalized_state[0] *= -1 # pull arm with low SPO2. for uganda and mimiciii, state[0] is 'SPO2',
+                vital_signs_avg = np.average(normalized_state, axis=1)
                 chosen_arms = np.argsort(vital_signs_avg)[:int(B - current_action_cost)]
                 # chosen_arms = np.random.choice(candidate_arms, int(B - current_action_cost), replace=False)
             actions[chosen_arms] = 1
