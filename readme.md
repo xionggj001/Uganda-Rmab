@@ -30,7 +30,12 @@ Main file for PreFeRMAB, the main algorithm is `agent_oracle.py`
 - Create the directory structure:
 - `bash make_dirs.sh`
 
-To run Synthetic dataset from the paper, run 
-`bash run/job.run_rmabppo_counterexample.sh`
+Place data files mimiciii.csv, mimiciv.csv, and uganda.csv under folder 'uganda-rmab'
+
+While installing mpi4py, the follow commands can be helpful:
+sudo apt-get install libopenmpi-dev
+
+To run Mimiciv dataset from the paper, run 
+`bash run/job.run_mimiciv.sh`
 
 Code adapted from https://github.com/killian-34/RobustRMAB, the github repo accompanying the paper "Restless and Uncertain: Robust Policies for Restless Bandits via Deep Multi-Agent Reinforcement Learning" in UAI 2023. 
